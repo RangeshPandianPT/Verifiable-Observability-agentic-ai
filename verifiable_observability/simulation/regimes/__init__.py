@@ -1,0 +1,1 @@
+# regimes — placeholder for Phase 5 (COMPLIANT, MILD_DRIFT, ADVERSARIAL_INJECTION, TOOL_FAILURE_DRIFT)
