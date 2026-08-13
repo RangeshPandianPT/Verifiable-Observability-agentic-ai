@@ -88,8 +88,8 @@ pytest tests/ -v
 | 0 | ✅ Done | Repo scaffolding, interfaces, smoke test |
 | 1 | ✅ Done | Rule Bank — matching, lifecycle, Finance seed rules |
 | 2 | ✅ Done | Strategy Profiler — rule-based task classifier |
-| 3 | ⬜ Next | Constraint Compliance Monitor — Finance constraints |
-| 4 | ⬜ | Real LLM wiring (Anthropic/OpenAI adapter) |
+| 3 | ✅ Done | Constraint Compliance Monitor — Finance constraints |
+| 4 | ⬜ Next | Real LLM wiring (Anthropic/OpenAI adapter) |
 | 5 | ⬜ | Metrics Engine + Behavioral Regimes |
 | 6 | ⬜ | Healthcare & Code Execution domains |
 | 7 | ⬜ | Evaluation harness + reproducible results |
