@@ -29,7 +29,7 @@ from verifiable_observability.core.constraint_monitor import StubCCM
 from verifiable_observability.core.metrics import BasicMetricsEngine
 from verifiable_observability.core.orchestrator import Orchestrator
 from verifiable_observability.core.rule_bank import RuleBank, StubRuleBank
-from verifiable_observability.core.strategy_profiler import StubStrategyProfiler
+from verifiable_observability.core.strategy_profiler import StrategyProfiler
 from verifiable_observability.simulation.domains.finance.seed_rules import (
     load_seed_rules_into_bank,
 )
@@ -116,7 +116,7 @@ def demo(
     ])
 
     orchestrator = Orchestrator(
-        strategy_profiler=StubStrategyProfiler(),
+        strategy_profiler=StrategyProfiler(),
         rule_bank=StubRuleBank(),
         ccm=StubCCM(),
         agent_adapter=adapter,
