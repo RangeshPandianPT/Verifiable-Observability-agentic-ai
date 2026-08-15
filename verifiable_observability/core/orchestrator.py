@@ -214,10 +214,7 @@ class Orchestrator:
 
     @staticmethod
     def _simulate_dispatch(action: Action) -> dict:
-        """Return a fake tool result for simulation purposes."""
-        return {
-            "status": "ok",
-            "tool": action.tool_name,
-            "simulated": True,
-            "echo_params": action.parameters,
-        }
+        """Return a domain-aware fake tool result using the tool registry."""
+        from verifiable_observability.agent.tool_registry import simulate_tool_call
+
+        return simulate_tool_call(action.tool_name, action.parameters)
