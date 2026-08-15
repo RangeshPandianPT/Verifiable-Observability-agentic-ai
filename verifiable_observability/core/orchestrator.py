@@ -58,6 +58,8 @@ class Orchestrator:
         trajectory_store: TrajectoryStore,
         metrics_engine: MetricsEngineBase | None = None,
         max_turns: int = 20,
+        agent_backend: str = "unknown",
+        model_name: str = "unknown",
     ) -> None:
         self.strategy_profiler = strategy_profiler
         self.rule_bank = rule_bank
@@ -66,6 +68,8 @@ class Orchestrator:
         self.trajectory_store = trajectory_store
         self.metrics_engine: MetricsEngineBase = metrics_engine or BasicMetricsEngine()
         self.max_turns = max_turns
+        self.agent_backend = agent_backend
+        self.model_name = model_name
 
     def run(self, task: Task) -> Trajectory:
         """
@@ -76,7 +80,12 @@ class Orchestrator:
         """
         # --- 0. Classify task ---
         profile = self.strategy_profiler.classify(task)
-        trajectory = Trajectory(task=task, strategy_profile=profile)
+        trajectory = Trajectory(
+            task=task,
+            strategy_profile=profile,
+            agent_backend=self.agent_backend,
+            model_name=self.model_name,
+        )
         logger.info(
             "Starting trajectory %s | task=%s | domain=%s | risk=%s",
             trajectory.trajectory_id[:8],
