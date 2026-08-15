@@ -133,7 +133,7 @@ pytest tests/ -v
 | 1 | ✅ Done | Rule Bank — matching, lifecycle, Finance seed rules |
 | 2 | ✅ Done | Strategy Profiler — rule-based task classifier |
 | 3 | ✅ Done | Constraint Compliance Monitor — Finance constraints |
-| 4 | ✅ Done | Real LLM wiring (Anthropic/OpenAI adapter) |
+| 4 | ✅ Done | Real LLM wiring (Ollama local, Anthropic, OpenAI adapters) |
 | 5 | ⬜ Next | Metrics Engine + Behavioral Regimes |
 | 6 | ⬜ | Healthcare & Code Execution domains |
 | 7 | ⬜ | Evaluation harness + reproducible results |
