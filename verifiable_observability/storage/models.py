@@ -252,6 +252,9 @@ class Trajectory(BaseModel):
     turns: list[Turn] = Field(default_factory=list)
     outcome: TrajectoryOutcome = TrajectoryOutcome.IN_PROGRESS
     failure_reason: str | None = None
+    # Backend provenance — enables cross-model RCR/CCR comparison (Phase 5-7)
+    agent_backend: str = "unknown"   # "ollama" | "anthropic" | "openai" | "scripted"
+    model_name: str = "unknown"      # e.g. "llama3.2:3b", "claude-3-5-sonnet-20241022"
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     completed_at: datetime | None = None
 
