@@ -204,6 +204,210 @@ class OllamaAgentAdapter(AgentAdapterBase):
             )
 
     # ------------------------------------------------------------------
+    # Public interface
+    # ------------------------------------------------------------------
+
+    def generate(
+        self,
+        system_prompt: str,
+        conversation: list[dict[str, Any]],
+        task: Task,
+    ) -> AgentResponse:
+        """
+        Call Ollama and parse the response into AgentResponse.
+
+        Tries native tool-calling first; falls back to JSON-prompt mode
+        if the response contains no tool calls and json_action_fallback=True.
+        """
+        messages = self._build_messages(system_prompt, conversation, task)
+
+        for attempt in range(self.max_retries + 1):
+            try:
+                return self._try_native_tools(messages)
+            except _NativeToolFailed as exc:
+                if not self.json_action_fallback:
+                    logger.warning(
+                        "Native tool-calling failed and fallback is disabled: %s", exc
+                    )
+                    return AgentResponse(
+                        reasoning=str(exc),
+                        is_final=True,
+                        raw_text=str(exc),
+                    )
+                logger.debug(
+                    "Native tool-calling had no tool call (attempt %d/%d); "
+                    "trying JSON-action fallback.",
+                    attempt + 1,
+                    self.max_retries + 1,
+                )
+                return self._try_json_fallback(messages)
+            except _ParseError as exc:
+                if attempt < self.max_retries:
+                    logger.warning(
+                        "JSON parse failed (attempt %d/%d): %s — retrying.",
+                        attempt + 1,
+                        self.max_retries + 1,
+                        exc,
+                    )
+                    time.sleep(0.5)
+                    continue
+                logger.error("JSON parse failed after %d attempts.", self.max_retries + 1)
+                return AgentResponse(
+                    reasoning=f"Malformed action after {self.max_retries + 1} retries: {exc}",
+                    is_final=True,
+                    raw_text=str(exc),
+                )
+            except OllamaUnavailableError:
+                raise
+            except Exception as exc:
+                self._handle_connection_error(exc)
+
+        # Should not reach here
+        return AgentResponse(reasoning="Adapter exhausted retries.", is_final=True, raw_text="")
+
+    # ------------------------------------------------------------------
+    # Internal: native tool-calling path
+    # ------------------------------------------------------------------
+
+    def _try_native_tools(self, messages: list[dict[str, Any]]) -> AgentResponse:
+        """
+        Attempt a call using the OpenAI-compatible tools parameter.
+
+        Raises _NativeToolFailed if the response contains no tool call
+        (indicating the model didn't follow the tool-calling format).
+        """
+        try:
+            response = self._client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                tools=self.tools,
+                tool_choice="auto",
+            )
+        except Exception as exc:
+            self._handle_connection_error(exc)
+
+        choice = response.choices[0]
+        message = choice.message
+        finish_reason = choice.finish_reason
+
+        text_content: str = message.content or ""
+
+        if finish_reason == "tool_calls" and message.tool_calls:
+            tc = message.tool_calls[0]
+            tool_name = tc.function.name
+            try:
+                tool_params = json.loads(tc.function.arguments or "{}")
+            except json.JSONDecodeError:
+                logger.warning("Malformed tool arguments JSON: %s", tc.function.arguments)
+                tool_params = {}
+
+            logger.debug(
+                "Native tool call | tool=%s params=%s", tool_name, tool_params
+            )
+            return AgentResponse(
+                reasoning=text_content or f"Calling {tool_name}",
+                tool_name=tool_name,
+                tool_parameters=tool_params,
+                is_final=False,
+                raw_text=text_content,
+            )
+
+        if finish_reason == "stop":
+            # Model finished without a tool call — task complete
+            return AgentResponse(
+                reasoning=text_content or "(no text)",
+                is_final=True,
+                raw_text=text_content,
+            )
+
+        # Neither tool_calls nor stop → no actionable response
+        raise _NativeToolFailed(
+            f"finish_reason={finish_reason!r}, no tool_calls in response"
+        )
+
+    # ------------------------------------------------------------------
+    # Internal: JSON-action fallback path
+    # ------------------------------------------------------------------
+
+    def _try_json_fallback(self, messages: list[dict[str, Any]]) -> AgentResponse:
+        """
+        Re-prompt the model asking it to emit a JSON block describing its action.
+        Parse the response and return an AgentResponse.
+        """
+        tool_names = [t["function"]["name"] for t in self.tools]
+        fallback_prompt = _JSON_ACTION_PROMPT.format(tool_names=", ".join(tool_names))
+
+        # Append the fallback instruction as a user message
+        fallback_messages = messages + [
+            {"role": "user", "content": fallback_prompt}
+        ]
+
+        try:
+            response = self._client.chat.completions.create(
+                model=self.model,
+                messages=fallback_messages,
+                # No tools= parameter — we want raw text with embedded JSON
+            )
+        except Exception as exc:
+            self._handle_connection_error(exc)
+
+        raw = response.choices[0].message.content or ""
+        logger.debug("JSON fallback raw response: %.200s", raw)
+
+        return self._parse_json_action(raw)
+
+    @staticmethod
+    def _parse_json_action(raw_text: str) -> AgentResponse:
+        """
+        Extract and validate the JSON action block from the model's text output.
+
+        Looks for a ```json ... ``` fenced block first, then falls back to
+        scanning for the first { ... } object in the text.
+
+        Raises _ParseError on failure.
+        """
+        # 1. Try fenced ```json block
+        fence_match = re.search(r"```json\s*(.*?)```", raw_text, re.DOTALL | re.IGNORECASE)
+        json_str = fence_match.group(1).strip() if fence_match else None
+
+        # 2. Fall back to first { ... } in text
+        if not json_str:
+            brace_match = re.search(r"\{.*\}", raw_text, re.DOTALL)
+            if brace_match:
+                json_str = brace_match.group(0).strip()
+
+        if not json_str:
+            raise _ParseError(f"No JSON block found in response: {raw_text[:200]!r}")
+
+        try:
+            data = json.loads(json_str)
+        except json.JSONDecodeError as exc:
+            raise _ParseError(f"JSON decode error: {exc} | input: {json_str[:200]!r}") from exc
+
+        # Validate required fields
+        if not isinstance(data, dict):
+            raise _ParseError(f"Expected JSON object, got: {type(data).__name__}")
+
+        tool_name: str | None = data.get("tool_name") or None
+        parameters: dict[str, Any] = data.get("parameters") or {}
+        reasoning: str = data.get("reasoning") or raw_text
+
+        if not isinstance(parameters, dict):
+            parameters = {}
+
+        is_final = tool_name is None
+        logger.debug(
+            "JSON fallback parsed | tool=%s is_final=%s", tool_name, is_final
+        )
+        return AgentResponse(
+            reasoning=reasoning,
+            tool_name=tool_name,
+            tool_parameters=parameters,
+            is_final=is_final,
+            raw_text=raw_text,
+        )
+
+    # ------------------------------------------------------------------
     # Internal: message construction
     # ------------------------------------------------------------------
 
