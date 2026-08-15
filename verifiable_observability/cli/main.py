@@ -3,6 +3,7 @@ Verifiable Observability — CLI entry point.
 
 Commands:
     demo              Run the Phase 0 smoke test end-to-end
+    run               Run a real LLM agent trajectory (Phase 4)
     rulebank list     List rules in the Rule Bank
     rulebank add      Add a rule from a JSON file
     rulebank verify   Promote a pending rule to verified
@@ -302,6 +303,175 @@ def rulebank_add(
     rule = Rule.model_validate(data)
     stored = rule_bank.add_rule(rule, provenance=provenance)
     console.print(f"[green][OK][/green] Rule added: [cyan]{stored.rule_id}[/] - {stored.name}")
+
+
+# ---------------------------------------------------------------------------
+# run command — Phase 4: real LLM wiring
+# ---------------------------------------------------------------------------
+
+
+@app.command()
+def run(
+    task_desc: Annotated[str, typer.Argument(help="Task description for the agent.")],
+    backend: Annotated[
+        str,
+        typer.Option(
+            "--backend",
+            "-b",
+            help="LLM backend: 'anthropic' or 'openai'.",
+        ),
+    ] = "anthropic",
+    model: Annotated[
+        Optional[str],
+        typer.Option("--model", "-m", help="Override model ID."),
+    ] = None,
+    domain: Annotated[
+        str,
+        typer.Option("--domain", "-d", help="Task domain: finance / healthcare / code_execution."),
+    ] = "finance",
+    max_turns: Annotated[
+        int,
+        typer.Option("--max-turns", help="Maximum turns before truncation."),
+    ] = 10,
+    seed_rules: Annotated[
+        bool,
+        typer.Option("--seed-rules", help="Load Finance seed rules into the Rule Bank."),
+    ] = True,
+    verbose: Annotated[bool, typer.Option("--verbose", "-v")] = False,
+    db: Annotated[str, typer.Option(help="Path to SQLite DB")] = "verifiable_observability.db",
+):
+    """
+    [bold]Phase 4[/bold] — Run a real LLM agent trajectory with full verification.
+
+    The agent uses the Anthropic or OpenAI API, guided by Finance seed rules,
+    the Strategy Profiler, and the Constraint Compliance Monitor.
+
+    Requires ANTHROPIC_API_KEY or OPENAI_API_KEY to be set (in .env or shell).
+
+    Example::
+
+        vo run "Transfer $500 from ACC-001 to ACC-002" --backend anthropic
+        vo run "Rebalance my portfolio" --backend openai --model gpt-4o --verbose
+    """
+    if verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+
+    console.rule(f"[bold cyan]Verifiable Observability — Real LLM Run ({backend})[/]")
+
+    # --- Resolve domain ---
+    try:
+        task_domain = Domain(domain.lower())
+    except ValueError:
+        console.print(f"[red]Unknown domain:[/] {domain!r}. Choose from: finance, healthcare, code_execution")
+        raise typer.Exit(1)
+
+    # --- Build adapter ---
+    backend_lower = backend.lower()
+    try:
+        if backend_lower == "anthropic":
+            from verifiable_observability.agent.anthropic_adapter import AnthropicAgentAdapter
+
+            adapter_kwargs: dict = {}
+            if model:
+                adapter_kwargs["model"] = model
+            agent_adapter = AnthropicAgentAdapter(**adapter_kwargs)
+            console.print(f"[dim]Using model:[/dim] [bold]{agent_adapter.model}[/]")
+
+        elif backend_lower == "openai":
+            from verifiable_observability.agent.openai_adapter import OpenAIAgentAdapter
+
+            adapter_kwargs = {}
+            if model:
+                adapter_kwargs["model"] = model
+            agent_adapter = OpenAIAgentAdapter(**adapter_kwargs)
+            console.print(f"[dim]Using model:[/dim] [bold]{agent_adapter.model}[/]")
+
+        else:
+            console.print(f"[red]Unknown backend:[/] {backend!r}. Choose 'anthropic' or 'openai'.")
+            raise typer.Exit(1)
+
+    except (ValueError, ImportError) as exc:
+        console.print(f"[red]Adapter error:[/] {exc}")
+        raise typer.Exit(1)
+
+    # --- Build supporting infrastructure ---
+    engine = _get_engine(db)
+    traj_store = TrajectoryStore(engine)
+    rule_store = RuleStore(engine)
+    rule_bank = RuleBank(rule_store)
+
+    if seed_rules and task_domain == Domain.FINANCE:
+        console.print("[dim]Loading Finance seed rules...[/dim]")
+        load_seed_rules_into_bank(rule_bank, auto_verify=True)
+
+    from verifiable_observability.core.constraint_monitor import FinanceCCM  # type: ignore[attr-defined]
+
+    # Import the real Finance CCM; fall back to stub if not yet implemented
+    try:
+        from verifiable_observability.core.constraint_monitor import FinanceCCM
+        ccm = FinanceCCM()
+    except (ImportError, AttributeError):
+        console.print("[yellow]FinanceCCM not found — using StubCCM (no constraint checking).[/yellow]")
+        ccm = StubCCM()
+
+    orchestrator = Orchestrator(
+        strategy_profiler=StrategyProfiler(),
+        rule_bank=rule_bank,
+        ccm=ccm,
+        agent_adapter=agent_adapter,
+        trajectory_store=traj_store,
+        metrics_engine=BasicMetricsEngine(),
+        max_turns=max_turns,
+    )
+
+    task = Task(
+        domain=task_domain,
+        description=task_desc,
+        metadata={"task_type": "llm_run", "backend": backend_lower},
+    )
+
+    console.print(f"\n[bold]Task:[/] {task.description}")
+    console.print(f"[dim]Domain:[/dim] {task_domain.value}  |  [dim]Max turns:[/dim] {max_turns}\n")
+
+    try:
+        trajectory = orchestrator.run(task)
+    except Exception as exc:
+        console.print(f"[red]LLM run failed:[/] {exc}")
+        raise typer.Exit(1)
+
+    # --- Display results ---
+    outcome_color = {
+        "completed": "green",
+        "blocked": "red",
+        "failed": "red",
+        "truncated": "yellow",
+        "in_progress": "cyan",
+    }.get(trajectory.outcome.value, "white")
+
+    console.print(f"[green]Trajectory ID:[/] {trajectory.trajectory_id}")
+    console.print(
+        f"[{outcome_color}]Outcome:[/{outcome_color}]       {trajectory.outcome.value.upper()}"
+    )
+    console.print(f"[green]Turns:[/]         {len(trajectory.turns)}")
+
+    if trajectory.failure_reason:
+        console.print(f"[red]Failure reason:[/] {trajectory.failure_reason}")
+
+    for turn in trajectory.turns:
+        console.print(_render_turn(turn))
+
+    engine_obj = BasicMetricsEngine()
+    summary = engine_obj.trajectory_summary(trajectory)
+    console.print("\n[bold]Metrics Summary:[/bold]")
+    console.print(json.dumps(summary, indent=2, default=str))
+
+    console.print(
+        Panel(
+            f"[bold green]Run complete.[/bold green]\n"
+            f"DB: [cyan]{Path(db).resolve()}[/]",
+            title="Done",
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
