@@ -74,6 +74,29 @@ vo rulebank show fin-rt-001
 vo rulebank add path/to/rule.json --provenance "trajectory-xyz"
 ```
 
+### Real LLM Run (Phase 4)
+
+1. Copy `.env.example` to `.env` and add your API key:
+```bash
+cp .env.example .env
+# Edit .env and set ANTHROPIC_API_KEY or OPENAI_API_KEY
+```
+
+2. Run a task with a real LLM:
+```bash
+# Anthropic Claude (default)
+vo run "Transfer $500 from ACC-001 to ACC-002"
+
+# OpenAI GPT-4o
+vo run "Rebalance my portfolio" --backend openai
+
+# With model override and verbose logging
+vo run "Check account balance" --backend anthropic --model claude-3-5-sonnet-20241022 --verbose
+
+# Custom domain or turn limit
+vo run "Execute high-value trade" --domain finance --max-turns 15
+```
+
 ### Run tests
 ```bash
 pytest tests/ -v
@@ -89,8 +112,8 @@ pytest tests/ -v
 | 1 | ✅ Done | Rule Bank — matching, lifecycle, Finance seed rules |
 | 2 | ✅ Done | Strategy Profiler — rule-based task classifier |
 | 3 | ✅ Done | Constraint Compliance Monitor — Finance constraints |
-| 4 | ⬜ Next | Real LLM wiring (Anthropic/OpenAI adapter) |
-| 5 | ⬜ | Metrics Engine + Behavioral Regimes |
+| 4 | ✅ Done | Real LLM wiring (Anthropic/OpenAI adapter) |
+| 5 | ⬜ Next | Metrics Engine + Behavioral Regimes |
 | 6 | ⬜ | Healthcare & Code Execution domains |
 | 7 | ⬜ | Evaluation harness + reproducible results |
 | 8 | ⬜ | Optional: minimal dashboard |
@@ -110,7 +133,10 @@ verifiable_observability/
 │   └── orchestrator.py        # Orchestrator — drives the turn loop
 ├── agent/
 │   ├── adapter.py             # AgentAdapterBase + ScriptedAgentAdapter
-│   └── loop.py                # AgentLoop wrapper
+│   ├── loop.py                # AgentLoop wrapper
+│   ├── tool_registry.py       # Finance tool schemas + simulated executor  [Phase 4]
+│   ├── anthropic_adapter.py   # AnthropicAgentAdapter (Claude)              [Phase 4]
+│   └── openai_adapter.py      # OpenAIAgentAdapter (GPT-4o)                 [Phase 4]
 ├── simulation/
 │   ├── domains/
 │   │   ├── finance/
@@ -122,10 +148,13 @@ verifiable_observability/
 │   ├── models.py              # All Pydantic v2 schemas
 │   └── db.py                  # SQLite (SQLAlchemy Core) — TrajectoryStore, RuleStore
 └── cli/
-    └── main.py                # Typer CLI: demo, rulebank list/verify/show/add
+    └── main.py                # Typer CLI: demo, run, rulebank list/verify/show/add
 tests/
 ├── test_smoke.py              # Phase 0 end-to-end smoke tests
-└── test_rule_bank.py          # Phase 1 Rule Bank unit tests
+├── test_rule_bank.py          # Phase 1 Rule Bank unit tests
+├── test_constraint_monitor.py # Phase 3 CCM unit tests
+└── test_llm_adapters.py       # Phase 4 adapter unit tests (mocked)
+.env.example                   # Environment variable template
 ```
 
 ---
