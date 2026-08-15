@@ -84,18 +84,39 @@ cp .env.example .env
 
 2. Run a task with a real LLM:
 ```bash
-# Anthropic Claude (default)
+# Ollama (default, zero API cost)
 vo run "Transfer $500 from ACC-001 to ACC-002"
+vo run "Check balance" --backend ollama --model llama3.2:3b
+
+# Anthropic Claude
+vo run "Transfer $500" --backend anthropic
 
 # OpenAI GPT-4o
 vo run "Rebalance my portfolio" --backend openai
 
-# With model override and verbose logging
+# Model override and verbose logging
 vo run "Check account balance" --backend anthropic --model claude-3-5-sonnet-20241022 --verbose
 
 # Custom domain or turn limit
 vo run "Execute high-value trade" --domain finance --max-turns 15
 ```
+
+### Ollama Local Setup
+
+1. Install Ollama: https://ollama.com/download
+2. Pull one or both supported models:
+```bash
+ollama pull llama3.2:3b   # 2 GB, fast, good for development
+ollama pull llama3.2:1b   # 1.2 GB, smallest option
+# or larger models when available:
+# ollama pull qwen2.5:14b
+```
+3. Start the server (runs automatically on Windows; or `ollama serve` on Linux/Mac)
+4. Set `agent_backend=ollama` in `config.yaml` (already the default) and run:
+```bash
+vo run "Transfer $500 from ACC-001 to ACC-002"
+```
+No API key required. All inference runs locally.
 
 ### Run tests
 ```bash
@@ -135,8 +156,10 @@ verifiable_observability/
 │   ├── adapter.py             # AgentAdapterBase + ScriptedAgentAdapter
 │   ├── loop.py                # AgentLoop wrapper
 │   ├── tool_registry.py       # Finance tool schemas + simulated executor  [Phase 4]
+│   ├── ollama_adapter.py      # OllamaAgentAdapter (default local backend) [Phase 4+]
 │   ├── anthropic_adapter.py   # AnthropicAgentAdapter (Claude)              [Phase 4]
-│   └── openai_adapter.py      # OpenAIAgentAdapter (GPT-4o)                 [Phase 4]
+│   ├── openai_adapter.py      # OpenAIAgentAdapter (GPT-4o)                 [Phase 4]
+│   └── factory.py             # build_adapter() -- config-driven selection    [Phase 4+]
 ├── simulation/
 │   ├── domains/
 │   │   ├── finance/
@@ -153,7 +176,9 @@ tests/
 ├── test_smoke.py              # Phase 0 end-to-end smoke tests
 ├── test_rule_bank.py          # Phase 1 Rule Bank unit tests
 ├── test_constraint_monitor.py # Phase 3 CCM unit tests
-└── test_llm_adapters.py       # Phase 4 adapter unit tests (mocked)
+├── test_llm_adapters.py       # Phase 4 adapter unit tests (cloud, mocked)
+└── test_ollama_adapter.py     # Phase 4+ Ollama adapter + factory tests (mocked)
+config.yaml                    # Runtime config + Phase 7 experiment sweep matrix
 .env.example                   # Environment variable template
 ```
 
@@ -183,4 +208,6 @@ Pass it to `Orchestrator(agent_adapter=MyAdapter(...))`.
 - Python 3.11+, Pydantic v2, SQLAlchemy Core (SQLite → upgradeable to Postgres)
 - Typer + Rich for CLI, pytest for tests
 - No external ML dependencies for rule matching (TF-IDF cosine is stdlib-compatible)
-- Anthropic / OpenAI adapters (Phase 4)
+- **Local inference**: Ollama (default) — llama3.2:3b, llama3.2:1b, qwen2.5 (Phase 4+)
+- Cloud adapters: Anthropic Claude, OpenAI GPT-4o (Phase 4)
+- `config.yaml` + env vars for backend selection; Phase 7 sweep matrix for multi-model experiments
