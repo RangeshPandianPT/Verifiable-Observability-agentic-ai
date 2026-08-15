@@ -1,0 +1,68 @@
+# Verifiable Observability — runtime configuration
+#
+# This file is the single control plane for the framework.
+# Overrides via environment variables always win (see .env.example).
+
+# ---------------------------------------------------------------------------
+# Agent backend — controls which LLM adapter the orchestrator uses
+# ---------------------------------------------------------------------------
+agent_backend: ollama           # "ollama" (default) | "anthropic" | "openai"
+
+# ---------------------------------------------------------------------------
+# Ollama settings (used when agent_backend=ollama)
+# ---------------------------------------------------------------------------
+ollama:
+  base_url: http://localhost:11434/v1
+  model: llama3.2:3b            # Override with AGENT_MODEL env var
+  timeout_seconds: 120
+  max_retries: 2
+  # Fallback: if native tool-calling fails, use JSON-prompt fallback
+  json_action_fallback: true
+
+# ---------------------------------------------------------------------------
+# Anthropic settings (used when agent_backend=anthropic)
+# ---------------------------------------------------------------------------
+anthropic:
+  model: claude-3-5-sonnet-20241022  # Override with VO_MODEL env var
+  max_tokens: 1024
+  temperature: 0
+
+# ---------------------------------------------------------------------------
+# OpenAI settings (used when agent_backend=openai)
+# ---------------------------------------------------------------------------
+openai:
+  model: gpt-4o                 # Override with VO_OPENAI_MODEL env var
+  max_tokens: 1024
+  temperature: 0
+
+# ---------------------------------------------------------------------------
+# Orchestrator defaults
+# ---------------------------------------------------------------------------
+orchestrator:
+  max_turns: 10
+  default_domain: finance
+  seed_rules: true              # Load Finance seed rules at startup
+
+# ---------------------------------------------------------------------------
+# Phase 7 — Experiment sweep matrix
+# Defines combinations to run in a single experiment.
+# Each axis is a list; the harness runs the Cartesian product of all axes.
+# ---------------------------------------------------------------------------
+experiment:
+  name: baseline_sweep
+  domains:
+    - finance
+  regimes:
+    - normal           # Phase 5 behavioural regimes
+  agent_backends:
+    - backend: ollama
+      model: llama3.2:3b
+    - backend: ollama
+      model: llama3.2:1b
+    # Uncomment to include cloud backends in the sweep:
+    # - backend: anthropic
+    #   model: claude-3-5-sonnet-20241022
+    # - backend: openai
+    #   model: gpt-4o
+  n_trajectories_per_cell: 3   # How many runs per (domain × regime × backend) cell
+  output_dir: experiment_results/
