@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sys
 from pathlib import Path
 from typing import Annotated, Optional
@@ -124,6 +125,8 @@ def demo(
         trajectory_store=traj_store,
         metrics_engine=BasicMetricsEngine(),
         max_turns=10,
+        agent_backend="scripted",
+        model_name="scripted",
     )
 
     task = Task(
@@ -185,7 +188,9 @@ def _render_turn(turn) -> Panel:
         )
         lines.append(f"[bold]CCM:[/] [{dec_color}]{cc.decision.value}[/]")
     if turn.metrics.rcr is not None:
-        lines.append(f"[bold]RCR:[/] {turn.metrics.rcr:.2f}  [bold]CCR:[/] {turn.metrics.ccr:.2f}")
+        rcr_str = f"{turn.metrics.rcr:.2f}"
+        ccr_str = f"{turn.metrics.ccr:.2f}" if turn.metrics.ccr is not None else "N/A"
+        lines.append(f"[bold]RCR:[/] {rcr_str}  [bold]CCR:[/] {ccr_str}")
 
     return Panel(
         "\n".join(lines),
@@ -306,7 +311,7 @@ def rulebank_add(
 
 
 # ---------------------------------------------------------------------------
-# run command — Phase 4: real LLM wiring
+# run command — Phase 4: real LLM wiring (Ollama default, cloud optional)
 # ---------------------------------------------------------------------------
 
 
@@ -314,16 +319,17 @@ def rulebank_add(
 def run(
     task_desc: Annotated[str, typer.Argument(help="Task description for the agent.")],
     backend: Annotated[
-        str,
+        Optional[str],
         typer.Option(
             "--backend",
             "-b",
-            help="LLM backend: 'anthropic' or 'openai'.",
+            help="LLM backend: 'ollama' (default) | 'anthropic' | 'openai'. "
+                 "Reads config.yaml if not specified.",
         ),
-    ] = "anthropic",
+    ] = None,
     model: Annotated[
         Optional[str],
-        typer.Option("--model", "-m", help="Override model ID."),
+        typer.Option("--model", "-m", help="Override model ID (sets AGENT_MODEL for this run)."),
     ] = None,
     domain: Annotated[
         str,
@@ -343,56 +349,58 @@ def run(
     """
     [bold]Phase 4[/bold] — Run a real LLM agent trajectory with full verification.
 
-    The agent uses the Anthropic or OpenAI API, guided by Finance seed rules,
-    the Strategy Profiler, and the Constraint Compliance Monitor.
+    Defaults to the Ollama local backend (zero API cost). Override with
+    --backend anthropic or --backend openai for cloud models.
 
-    Requires ANTHROPIC_API_KEY or OPENAI_API_KEY to be set (in .env or shell).
+    Backend and model name are recorded on the Trajectory for cross-model
+    RCR/CCR comparison in Phase 5-7 analysis.
 
     Example::
 
-        vo run "Transfer $500 from ACC-001 to ACC-002" --backend anthropic
+        vo run "Transfer $500 from ACC-001 to ACC-002"
+        vo run "Transfer $500" --backend ollama --model llama3.2:3b
         vo run "Rebalance my portfolio" --backend openai --model gpt-4o --verbose
+        vo run "Check account balance" --backend anthropic
     """
     if verbose:
         logging.getLogger().setLevel(logging.DEBUG)
 
-    console.rule(f"[bold cyan]Verifiable Observability — Real LLM Run ({backend})[/]")
+    # Apply model override to env so the factory picks it up
+    if model:
+        os.environ["AGENT_MODEL"] = model
+        os.environ["VO_MODEL"] = model
+        os.environ["VO_OPENAI_MODEL"] = model
 
     # --- Resolve domain ---
     try:
         task_domain = Domain(domain.lower())
     except ValueError:
-        console.print(f"[red]Unknown domain:[/] {domain!r}. Choose from: finance, healthcare, code_execution")
+        console.print(
+            f"[red]Unknown domain:[/] {domain!r}. "
+            "Choose from: finance, healthcare, code_execution"
+        )
         raise typer.Exit(1)
 
-    # --- Build adapter ---
-    backend_lower = backend.lower()
+    # --- Build adapter via factory ---
+    from verifiable_observability.agent.factory import build_adapter
+    from verifiable_observability.agent.ollama_adapter import OllamaUnavailableError, OllamaModelNotFoundError
+
     try:
-        if backend_lower == "anthropic":
-            from verifiable_observability.agent.anthropic_adapter import AnthropicAgentAdapter
-
-            adapter_kwargs: dict = {}
-            if model:
-                adapter_kwargs["model"] = model
-            agent_adapter = AnthropicAgentAdapter(**adapter_kwargs)
-            console.print(f"[dim]Using model:[/dim] [bold]{agent_adapter.model}[/]")
-
-        elif backend_lower == "openai":
-            from verifiable_observability.agent.openai_adapter import OpenAIAgentAdapter
-
-            adapter_kwargs = {}
-            if model:
-                adapter_kwargs["model"] = model
-            agent_adapter = OpenAIAgentAdapter(**adapter_kwargs)
-            console.print(f"[dim]Using model:[/dim] [bold]{agent_adapter.model}[/]")
-
-        else:
-            console.print(f"[red]Unknown backend:[/] {backend!r}. Choose 'anthropic' or 'openai'.")
-            raise typer.Exit(1)
-
-    except (ValueError, ImportError) as exc:
+        info = build_adapter(backend_override=backend)
+    except (OllamaUnavailableError, OllamaModelNotFoundError) as exc:
+        console.print(f"[red bold]Ollama error:[/red bold] {exc}")
+        raise typer.Exit(1)
+    except (ValueError, ImportError, RuntimeError) as exc:
         console.print(f"[red]Adapter error:[/] {exc}")
         raise typer.Exit(1)
+
+    console.rule(
+        f"[bold cyan]Verifiable Observability — {info.backend.upper()} / {info.model_name}[/]"
+    )
+    console.print(
+        f"[dim]Backend:[/dim] [bold]{info.backend}[/]  "
+        f"[dim]Model:[/dim] [bold]{info.model_name}[/]"
+    )
 
     # --- Build supporting infrastructure ---
     engine = _get_engine(db)
@@ -403,8 +411,6 @@ def run(
     if seed_rules and task_domain == Domain.FINANCE:
         console.print("[dim]Loading Finance seed rules...[/dim]")
         load_seed_rules_into_bank(rule_bank, auto_verify=True)
-
-    from verifiable_observability.core.constraint_monitor import FinanceCCM  # type: ignore[attr-defined]
 
     # Import the real Finance CCM; fall back to stub if not yet implemented
     try:
@@ -418,23 +424,31 @@ def run(
         strategy_profiler=StrategyProfiler(),
         rule_bank=rule_bank,
         ccm=ccm,
-        agent_adapter=agent_adapter,
+        agent_adapter=info.adapter,
         trajectory_store=traj_store,
         metrics_engine=BasicMetricsEngine(),
         max_turns=max_turns,
+        agent_backend=info.backend,
+        model_name=info.model_name,
     )
 
     task = Task(
         domain=task_domain,
         description=task_desc,
-        metadata={"task_type": "llm_run", "backend": backend_lower},
+        metadata={"task_type": "llm_run", "backend": info.backend, "model": info.model_name},
     )
 
     console.print(f"\n[bold]Task:[/] {task.description}")
-    console.print(f"[dim]Domain:[/dim] {task_domain.value}  |  [dim]Max turns:[/dim] {max_turns}\n")
+    console.print(
+        f"[dim]Domain:[/dim] {task_domain.value}  |  "
+        f"[dim]Max turns:[/dim] {max_turns}\n"
+    )
 
     try:
         trajectory = orchestrator.run(task)
+    except (OllamaUnavailableError, OllamaModelNotFoundError) as exc:
+        console.print(f"[red bold]Ollama error:[/red bold] {exc}")
+        raise typer.Exit(1)
     except Exception as exc:
         console.print(f"[red]LLM run failed:[/] {exc}")
         raise typer.Exit(1)
@@ -448,11 +462,12 @@ def run(
         "in_progress": "cyan",
     }.get(trajectory.outcome.value, "white")
 
-    console.print(f"[green]Trajectory ID:[/] {trajectory.trajectory_id}")
+    console.print(f"[green]Trajectory ID:[/]  {trajectory.trajectory_id}")
+    console.print(f"[green]Backend:[/]        {trajectory.agent_backend} / {trajectory.model_name}")
     console.print(
-        f"[{outcome_color}]Outcome:[/{outcome_color}]       {trajectory.outcome.value.upper()}"
+        f"[{outcome_color}]Outcome:[/{outcome_color}]        {trajectory.outcome.value.upper()}"
     )
-    console.print(f"[green]Turns:[/]         {len(trajectory.turns)}")
+    console.print(f"[green]Turns:[/]          {len(trajectory.turns)}")
 
     if trajectory.failure_reason:
         console.print(f"[red]Failure reason:[/] {trajectory.failure_reason}")
@@ -462,12 +477,16 @@ def run(
 
     engine_obj = BasicMetricsEngine()
     summary = engine_obj.trajectory_summary(trajectory)
+    # Inject backend provenance into the summary
+    summary["agent_backend"] = trajectory.agent_backend
+    summary["model_name"] = trajectory.model_name
     console.print("\n[bold]Metrics Summary:[/bold]")
     console.print(json.dumps(summary, indent=2, default=str))
 
     console.print(
         Panel(
             f"[bold green]Run complete.[/bold green]\n"
+            f"Backend: [cyan]{trajectory.agent_backend}[/] / [cyan]{trajectory.model_name}[/]\n"
             f"DB: [cyan]{Path(db).resolve()}[/]",
             title="Done",
         )
