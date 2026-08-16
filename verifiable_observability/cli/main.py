@@ -1,4 +1,4 @@
-﻿"""
+"""
 Verifiable Observability — CLI entry point.
 
 Commands:
@@ -627,6 +627,223 @@ def analyze_trajectories(
         for traj in trajectories:
             report = metrics_engine.detect_drift(traj)
             console.print(json.dumps(report.to_dict(), indent=2, default=str))
+
+
+
+# ---------------------------------------------------------------------------
+# regime commands — Phase 5
+# ---------------------------------------------------------------------------
+
+
+@regime_app.command("run")
+def regime_run(
+    regime_name: Annotated[
+        str,
+        typer.Argument(
+            help="Regime to run: compliant | mild_drift | adversarial_injection | tool_failure_drift"
+        ),
+    ],
+    domain: Annotated[
+        str,
+        typer.Option("--domain", "-d", help="Task domain."),
+    ] = "finance",
+    seed_rules: Annotated[
+        bool,
+        typer.Option("--seed-rules", help="Load Finance seed rules into Rule Bank."),
+    ] = True,
+    db: Annotated[str, typer.Option(help="Path to SQLite DB")] = "verifiable_observability.db",
+    verbose: Annotated[bool, typer.Option("--verbose", "-v")] = False,
+):
+    """
+    [bold]Phase 5[/bold] — Run a scripted behavioral regime through the full verification stack.
+
+    Each regime produces a scripted trajectory with a known behavioral signature,
+    letting you validate that the Rule Bank and CCM respond as expected.
+
+    Regimes::
+
+        compliant              All rules matched, all constraints satisfied.
+        mild_drift             Skips pre-checks; rule misses without hard violations.
+        adversarial_injection  Large unauthorized transfer triggers CCM BLOCK.
+        tool_failure_drift     Tool errors cause declining RCR over turns.
+
+    Example::
+
+        vo regime run compliant
+        vo regime run adversarial_injection --verbose
+        vo regime run tool_failure_drift --domain finance
+    """
+    if verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+
+    from verifiable_observability.simulation.regimes import RegimeType, build_regime
+    from verifiable_observability.core.metrics import BasicMetricsEngine
+    from verifiable_observability.storage.db import RuleStore, TrajectoryStore, create_db_engine
+
+    # --- Resolve regime ---
+    try:
+        regime = build_regime(regime_name)
+    except ValueError as exc:
+        console.print(f"[red]Error:[/] {exc}")
+        raise typer.Exit(1)
+
+    # --- Resolve domain ---
+    try:
+        task_domain = Domain(domain.lower())
+    except ValueError:
+        console.print(
+            f"[red]Unknown domain:[/] {domain!r}. "
+            "Choose from: finance, healthcare, code_execution"
+        )
+        raise typer.Exit(1)
+
+    console.rule(
+        f"[bold cyan]Verifiable Observability — Regime: {regime.regime_type.value.upper()}[/]"
+    )
+    console.print(f"[dim]{regime.description}[/dim]\n")
+
+    # --- Infrastructure ---
+    engine = _get_engine(db)
+    traj_store = TrajectoryStore(engine)
+    rule_store = RuleStore(engine)
+    rule_bank = RuleBank(rule_store)
+
+    if seed_rules and task_domain == Domain.FINANCE:
+        console.print("[dim]Loading Finance seed rules...[/dim]")
+        load_seed_rules_into_bank(rule_bank, auto_verify=True)
+
+    try:
+        from verifiable_observability.core.constraint_monitor import FinanceCCM
+        ccm = FinanceCCM()
+    except (ImportError, AttributeError):
+        console.print("[yellow]FinanceCCM not found — using StubCCM.[/yellow]")
+        ccm = StubCCM()
+
+    task_description = (
+        f"[Regime: {regime.regime_type.value}] Transfer funds from ACC-001 to ACC-002."
+    )
+    adapter = regime.build_adapter(task_description=task_description)
+
+    orchestrator = Orchestrator(
+        strategy_profiler=StrategyProfiler(),
+        rule_bank=rule_bank,
+        ccm=ccm,
+        agent_adapter=adapter,
+        trajectory_store=traj_store,
+        metrics_engine=BasicMetricsEngine(),
+        max_turns=10,
+        agent_backend="scripted",
+        model_name=f"regime:{regime.regime_type.value}",
+    )
+
+    task = Task(
+        domain=task_domain,
+        description=task_description,
+        metadata={
+            "regime": regime.regime_type.value,
+            "task_type": "routine_transfer",
+        },
+    )
+
+    console.print(f"[bold]Task:[/] {task_description}")
+    trajectory = orchestrator.run(task)
+
+    # --- Results ---
+    outcome_color = {
+        "completed": "green",
+        "blocked": "red",
+        "failed": "red",
+        "truncated": "yellow",
+        "in_progress": "cyan",
+    }.get(trajectory.outcome.value, "white")
+
+    console.print(f"\n[green]Trajectory ID:[/] {trajectory.trajectory_id}")
+    console.print(
+        f"[{outcome_color}]Outcome:[/{outcome_color}]       "
+        f"{trajectory.outcome.value.upper()}"
+    )
+    console.print(f"[green]Turns:[/]         {len(trajectory.turns)}")
+
+    if trajectory.failure_reason:
+        console.print(f"[red]Failure reason:[/] {trajectory.failure_reason}")
+
+    for turn in trajectory.turns:
+        console.print(_render_turn(turn))
+
+    # Drift analysis
+    metrics_engine = BasicMetricsEngine()
+    report = metrics_engine.detect_drift(trajectory, regime=regime.regime_type.value)
+    summary = metrics_engine.trajectory_summary(trajectory)
+    summary["regime"] = regime.regime_type.value
+
+    console.print("\n[bold]Metrics Summary:[/bold]")
+    console.print(json.dumps(summary, indent=2, default=str))
+
+    # Drift report
+    drift_color = "bold red" if report.drift_detected else "bold green"
+    drift_label = "⚠ DRIFT DETECTED" if report.drift_detected else "✓ No drift detected"
+    drift_info = (
+        "  Reasons:\n" + "\n".join(f"  • {r}" for r in report.drift_reasons)
+        if report.drift_reasons
+        else ""
+    )
+    console.print(
+        Panel(
+            f"[{drift_color}]{drift_label}[/{drift_color}]\n"
+            f"RCR trend: [bold]{report.rcr_trend.value}[/]  "
+            f"CCR trend: [bold]{report.ccr_trend.value}[/]"
+            + (f"\n{drift_info}" if drift_info else ""),
+            title="Drift Analysis",
+            border_style="red" if report.drift_detected else "green",
+        )
+    )
+
+    # Check expectations
+    expectations = regime.expectations
+    expected_outcomes = expectations["expected_outcomes"]
+    ok = trajectory.outcome.value in expected_outcomes
+    exp_color = "green" if ok else "red"
+    console.print(
+        Panel(
+            f"[{exp_color}]Outcome match: {ok}[/{exp_color}]\n"
+            f"Expected: {expected_outcomes}  |  Got: {trajectory.outcome.value}\n"
+            f"Drift expected: {expectations['drift_expected']}  "
+            f"|  Detected: {report.drift_detected}",
+            title="Expectation Check",
+            border_style=exp_color,
+        )
+    )
+
+
+@regime_app.command("list")
+def regime_list():
+    """List all available behavioral regimes."""
+    from verifiable_observability.simulation.regimes import (
+        ALL_REGIMES,
+        REGIME_EXPECTATIONS,
+        RegimeType,
+        build_regime,
+    )
+
+    console.rule("[bold cyan]Behavioral Regimes[/]")
+    table = Table(title="Available Regimes (Phase 5)")
+    table.add_column("Regime", style="bold cyan")
+    table.add_column("Description")
+    table.add_column("Expected Outcome")
+    table.add_column("Drift Expected?")
+
+    for rt in ALL_REGIMES:
+        regime = build_regime(rt)
+        exp = REGIME_EXPECTATIONS[rt]
+        drift_exp = "[bold red]Yes[/]" if exp["drift_expected"] else "[green]No[/]"
+        table.add_row(
+            rt.value,
+            regime.description,
+            ", ".join(exp["expected_outcomes"]),
+            drift_exp,
+        )
+
+    console.print(table)
 
 
 # ---------------------------------------------------------------------------
