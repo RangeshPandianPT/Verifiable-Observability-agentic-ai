@@ -53,7 +53,10 @@ experiment:
   domains:
     - finance
   regimes:
-    - normal           # Phase 5 behavioural regimes
+    - compliant              # Phase 5 behavioural regimes
+    - mild_drift
+    - adversarial_injection
+    - tool_failure_drift
   agent_backends:
     - backend: ollama
       model: llama3.2:3b

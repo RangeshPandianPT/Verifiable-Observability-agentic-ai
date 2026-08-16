@@ -118,6 +118,33 @@ vo run "Transfer $500 from ACC-001 to ACC-002"
 ```
 No API key required. All inference runs locally.
 
+### Behavioral Regimes (Phase 5)
+```bash
+# List all available regimes
+vo regime list
+
+# Run a regime through the full verification stack
+vo regime run compliant
+vo regime run mild_drift
+vo regime run adversarial_injection --verbose
+vo regime run tool_failure_drift --domain finance
+```
+
+### Trajectory Analysis + Drift Detection (Phase 5)
+```bash
+# Compare all stored trajectories (RCR, CCR, drift flag)
+vo analyze trajectories
+
+# Show only trajectories where drift was detected
+vo analyze trajectories --drift-only
+
+# Filter by domain or outcome
+vo analyze trajectories --domain finance --outcome blocked
+
+# Verbose: includes full per-trajectory drift report JSON
+vo analyze trajectories --verbose
+```
+
 ### Run tests
 ```bash
 pytest tests/ -v
@@ -134,8 +161,8 @@ pytest tests/ -v
 | 2 | ✅ Done | Strategy Profiler — rule-based task classifier |
 | 3 | ✅ Done | Constraint Compliance Monitor — Finance constraints |
 | 4 | ✅ Done | Real LLM wiring (Ollama local, Anthropic, OpenAI adapters) |
-| 5 | ⬜ Next | Metrics Engine + Behavioral Regimes |
-| 6 | ⬜ | Healthcare & Code Execution domains |
+| 5 | ✅ Done | Metrics Engine + Behavioral Regimes + Drift Detection |
+| 6 | ⬜ Next | Healthcare & Code Execution domains |
 | 7 | ⬜ | Evaluation harness + reproducible results |
 | 8 | ⬜ | Optional: minimal dashboard |
 
@@ -167,6 +194,11 @@ verifiable_observability/
 │   │   ├── healthcare/        # Phase 6
 │   │   └── code_execution/    # Phase 6
 │   └── regimes/               # Phase 5
+│       ├── base.py            # RegimeBase + RegimeType enum + REGIME_EXPECTATIONS
+│       ├── compliant.py       # COMPLIANT — high RCR, CCR=1.0
+│       ├── mild_drift.py      # MILD_DRIFT — skips pre-checks, rule misses
+│       ├── adversarial_injection.py  # ADVERSARIAL — triggers CCM BLOCK
+│       └── tool_failure_drift.py     # TOOL_FAILURE — declining RCR over turns
 ├── storage/
 │   ├── models.py              # All Pydantic v2 schemas
 │   └── db.py                  # SQLite (SQLAlchemy Core) — TrajectoryStore, RuleStore
@@ -177,7 +209,8 @@ tests/
 ├── test_rule_bank.py          # Phase 1 Rule Bank unit tests
 ├── test_constraint_monitor.py # Phase 3 CCM unit tests
 ├── test_llm_adapters.py       # Phase 4 adapter unit tests (cloud, mocked)
-└── test_ollama_adapter.py     # Phase 4+ Ollama adapter + factory tests (mocked)
+├── test_ollama_adapter.py     # Phase 4+ Ollama adapter + factory tests (mocked)
+└── test_phase5_regimes.py     # Phase 5 regimes, drift detection, metrics tests
 config.yaml                    # Runtime config + Phase 7 experiment sweep matrix
 .env.example                   # Environment variable template
 ```
