@@ -1,4 +1,4 @@
-"""
+﻿"""
 Verifiable Observability — CLI entry point.
 
 Commands:
@@ -8,6 +8,8 @@ Commands:
     rulebank add      Add a rule from a JSON file
     rulebank verify   Promote a pending rule to verified
     rulebank show     Show a single rule in detail
+    analyze           Phase 5 — compare trajectories; detect drift
+    regime run        Phase 5 — run a scripted behavioral regime
 """
 
 from __future__ import annotations
@@ -50,6 +52,12 @@ app = typer.Typer(
 
 rulebank_app = typer.Typer(help="Rule Bank management commands")
 app.add_typer(rulebank_app, name="rulebank")
+
+analyze_app = typer.Typer(help="Phase 5 — trajectory analysis and drift detection")
+app.add_typer(analyze_app, name="analyze")
+
+regime_app = typer.Typer(help="Phase 5 — scripted behavioral regime runs")
+app.add_typer(regime_app, name="regime")
 
 console = Console()
 
@@ -491,6 +499,134 @@ def run(
             title="Done",
         )
     )
+
+
+# ---------------------------------------------------------------------------
+# analyze commands — Phase 5
+# ---------------------------------------------------------------------------
+
+
+@analyze_app.command("trajectories")
+def analyze_trajectories(
+    domain: Annotated[
+        Optional[str],
+        typer.Option("--domain", "-d", help="Filter by domain."),
+    ] = None,
+    outcome: Annotated[
+        Optional[str],
+        typer.Option("--outcome", "-o", help="Filter by outcome (completed/blocked/truncated)."),
+    ] = None,
+    limit: Annotated[
+        int,
+        typer.Option("--limit", "-n", help="Max trajectories to load."),
+    ] = 50,
+    db: Annotated[str, typer.Option(help="Path to SQLite DB")] = "verifiable_observability.db",
+    drift_only: Annotated[
+        bool,
+        typer.Option("--drift-only", help="Show only trajectories with drift detected."),
+    ] = False,
+    verbose: Annotated[bool, typer.Option("--verbose", "-v")] = False,
+):
+    """
+    [bold]Phase 5[/bold] — Compare stored trajectories and flag behavioural drift.
+
+    Loads trajectories from the DB and prints a comparison table with
+    per-trajectory RCR, CCR, trend direction, and drift flag.
+
+    Example::
+
+        vo analyze trajectories
+        vo analyze trajectories --drift-only
+        vo analyze trajectories --domain finance --outcome blocked
+        vo analyze trajectories -n 20 --verbose
+    """
+    from verifiable_observability.core.metrics import BasicMetricsEngine
+    from verifiable_observability.storage.db import TrajectoryStore, create_db_engine
+
+    engine = _get_engine(db)
+    traj_store = TrajectoryStore(engine)
+    metrics_engine = BasicMetricsEngine()
+
+    console.rule("[bold cyan]Verifiable Observability — Trajectory Analysis[/]")
+
+    summaries = traj_store.list_trajectories(domain=domain, outcome=outcome, limit=limit)
+    if not summaries:
+        console.print("[yellow]No trajectories found in the database.[/yellow]")
+        raise typer.Exit(0)
+
+    # Load full trajectory objects for drift analysis
+    trajectories = []
+    for s in summaries:
+        t = traj_store.load(s["trajectory_id"])
+        if t is not None:
+            trajectories.append(t)
+
+    rows = metrics_engine.compare_trajectories(trajectories)
+
+    if drift_only:
+        rows = [r for r in rows if r["drift"] != "OK"]
+        if not rows:
+            console.print("[green]No drift detected in any trajectory.[/green]")
+            raise typer.Exit(0)
+
+    table = Table(
+        title=f"Trajectory Analysis ({len(rows)} trajectories)",
+        show_lines=False,
+    )
+    table.add_column("ID", style="dim", no_wrap=True)
+    table.add_column("Backend", style="cyan")
+    table.add_column("Model", style="cyan")
+    table.add_column("Regime")
+    table.add_column("Turns", justify="right")
+    table.add_column("Outcome")
+    table.add_column("Avg RCR", justify="right")
+    table.add_column("Avg CCR", justify="right")
+    table.add_column("RCR Trend")
+    table.add_column("CCR Trend")
+    table.add_column("Drift")
+
+    outcome_colors = {
+        "completed": "green",
+        "blocked": "red",
+        "truncated": "yellow",
+        "failed": "red",
+        "in_progress": "cyan",
+    }
+    trend_colors = {
+        "improving": "green",
+        "stable": "white",
+        "degrading": "red",
+        "insufficient_data": "dim",
+    }
+
+    for r in rows:
+        oc = outcome_colors.get(r["outcome"], "white")
+        rcr_c = trend_colors.get(r["rcr_trend"], "white")
+        ccr_c = trend_colors.get(r["ccr_trend"], "white")
+        drift_style = "bold red" if r["drift"] != "OK" else "green"
+
+        table.add_row(
+            r["trajectory_id"],
+            r["backend"],
+            r["model"],
+            r["regime"],
+            str(r["turns"]),
+            f"[{oc}]{r['outcome']}[/{oc}]",
+            r["avg_rcr"],
+            r["avg_ccr"],
+            f"[{rcr_c}]{r['rcr_trend']}[/{rcr_c}]",
+            f"[{ccr_c}]{r['ccr_trend']}[/{ccr_c}]",
+            f"[{drift_style}]{r['drift']}[/{drift_style}]",
+        )
+
+    console.print(table)
+
+    if verbose:
+        # Print per-trajectory drift report in JSON
+        console.print("\n[bold]Per-trajectory Drift Reports:[/bold]")
+        for traj in trajectories:
+            report = metrics_engine.detect_drift(traj)
+            console.print(json.dumps(report.to_dict(), indent=2, default=str))
 
 
 # ---------------------------------------------------------------------------
