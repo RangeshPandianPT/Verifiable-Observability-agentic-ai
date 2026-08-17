@@ -130,6 +130,30 @@ vo regime run adversarial_injection --verbose
 vo regime run tool_failure_drift --domain finance
 ```
 
+### Domain Seed Rules (Phase 6)
+```bash
+# Load seed rules for any domain into the Rule Bank
+vo domain seed finance
+vo domain seed healthcare
+vo domain seed code_execution
+
+# Load without auto-verifying (rules stay PENDING)
+vo domain seed healthcare --no-verify
+```
+
+### Run Healthcare or Code Execution tasks (Phase 6)
+```bash
+# Healthcare tasks — medication management, patient data access, clinical decisions
+vo run "Prescribe amoxicillin for patient PAT-001" --domain healthcare
+vo run "Retrieve patient record for PAT-002" --domain healthcare
+vo run "Recommend treatment guideline for hypertension" --domain healthcare
+
+# Code Execution tasks — code generation, review, system commands
+vo run "Generate a Python function to parse JSON" --domain code_execution
+vo run "Review this pull request for security issues" --domain code_execution
+vo run "Execute a shell command to list files" --domain code_execution
+```
+
 ### Trajectory Analysis + Drift Detection (Phase 5)
 ```bash
 # Compare all stored trajectories (RCR, CCR, drift flag)
@@ -140,6 +164,7 @@ vo analyze trajectories --drift-only
 
 # Filter by domain or outcome
 vo analyze trajectories --domain finance --outcome blocked
+vo analyze trajectories --domain healthcare
 
 # Verbose: includes full per-trajectory drift report JSON
 vo analyze trajectories --verbose
@@ -162,8 +187,8 @@ pytest tests/ -v
 | 3 | ✅ Done | Constraint Compliance Monitor — Finance constraints |
 | 4 | ✅ Done | Real LLM wiring (Ollama local, Anthropic, OpenAI adapters) |
 | 5 | ✅ Done | Metrics Engine + Behavioral Regimes + Drift Detection |
-| 6 | ⬜ Next | Healthcare & Code Execution domains |
-| 7 | ⬜ | Evaluation harness + reproducible results |
+| 6 | ✅ Done | Healthcare & Code Execution domains |
+| 7 | ⬜ Next | Evaluation harness + reproducible results |
 | 8 | ⬜ | Optional: minimal dashboard |
 
 ---
@@ -173,16 +198,16 @@ pytest tests/ -v
 ```
 verifiable_observability/
 ├── core/
-│   ├── strategy_profiler.py   # StrategyProfilerBase + StubStrategyProfiler
+│   ├── strategy_profiler.py   # StrategyProfilerBase + StrategyProfiler (all 3 domains)
 │   ├── rule_bank.py           # RuleBankBase + StubRuleBank + RuleBank
 │   ├── matching.py            # StructuredPredicateMatcher + SimilarityMatcher
-│   ├── constraint_monitor.py  # ConstraintComplianceMonitorBase + StubCCM
+│   ├── constraint_monitor.py  # StubCCM, FinanceCCM, HealthcareCCM, CodeExecutionCCM + build_ccm()
 │   ├── metrics.py             # MetricsEngineBase + BasicMetricsEngine
 │   └── orchestrator.py        # Orchestrator — drives the turn loop
 ├── agent/
 │   ├── adapter.py             # AgentAdapterBase + ScriptedAgentAdapter
 │   ├── loop.py                # AgentLoop wrapper
-│   ├── tool_registry.py       # Finance tool schemas + simulated executor  [Phase 4]
+│   ├── tool_registry.py       # Finance/Healthcare/CodeExec tool schemas + get_tools_for_domain()  [Phase 4+6]
 │   ├── ollama_adapter.py      # OllamaAgentAdapter (default local backend) [Phase 4+]
 │   ├── anthropic_adapter.py   # AnthropicAgentAdapter (Claude)              [Phase 4]
 │   ├── openai_adapter.py      # OpenAIAgentAdapter (GPT-4o)                 [Phase 4]
@@ -190,9 +215,11 @@ verifiable_observability/
 ├── simulation/
 │   ├── domains/
 │   │   ├── finance/
-│   │   │   └── seed_rules.py  # 15 Finance seed rules
-│   │   ├── healthcare/        # Phase 6
-│   │   └── code_execution/    # Phase 6
+│   │   │   └── seed_rules.py  # 15 Finance seed rules (routine_transfer, portfolio_rebalance, high_value_trade)
+│   │   ├── healthcare/
+│   │   │   └── seed_rules.py  # 12 Healthcare seed rules (medication_management, patient_data_access, clinical_decision_support)  [Phase 6]
+│   │   └── code_execution/
+│   │       └── seed_rules.py  # 12 Code Execution seed rules (code_generation, code_review, system_command_execution)  [Phase 6]
 │   └── regimes/               # Phase 5
 │       ├── base.py            # RegimeBase + RegimeType enum + REGIME_EXPECTATIONS
 │       ├── compliant.py       # COMPLIANT — high RCR, CCR=1.0
@@ -203,14 +230,15 @@ verifiable_observability/
 │   ├── models.py              # All Pydantic v2 schemas
 │   └── db.py                  # SQLite (SQLAlchemy Core) — TrajectoryStore, RuleStore
 └── cli/
-    └── main.py                # Typer CLI: demo, run, rulebank list/verify/show/add
+    └── main.py                # Typer CLI: demo, run, rulebank, analyze, regime, domain
 tests/
 ├── test_smoke.py              # Phase 0 end-to-end smoke tests
 ├── test_rule_bank.py          # Phase 1 Rule Bank unit tests
 ├── test_constraint_monitor.py # Phase 3 CCM unit tests
 ├── test_llm_adapters.py       # Phase 4 adapter unit tests (cloud, mocked)
 ├── test_ollama_adapter.py     # Phase 4+ Ollama adapter + factory tests (mocked)
-└── test_phase5_regimes.py     # Phase 5 regimes, drift detection, metrics tests
+├── test_phase5_regimes.py     # Phase 5 regimes, drift detection, metrics tests
+└── test_phase6_domains.py     # Phase 6 Healthcare + Code Execution domain tests (68 tests)
 config.yaml                    # Runtime config + Phase 7 experiment sweep matrix
 .env.example                   # Environment variable template
 ```
