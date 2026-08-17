@@ -10,6 +10,7 @@ Commands:
     rulebank show     Show a single rule in detail
     analyze           Phase 5 — compare trajectories; detect drift
     regime run        Phase 5 — run a scripted behavioral regime
+    domain seed       Phase 6 — load seed rules for a domain into the Rule Bank
 """
 
 from __future__ import annotations
@@ -29,13 +30,19 @@ from rich.table import Table
 from rich.text import Text
 
 from verifiable_observability.agent.adapter import AgentResponse, ScriptedAgentAdapter
-from verifiable_observability.core.constraint_monitor import StubCCM
+from verifiable_observability.core.constraint_monitor import StubCCM, build_ccm
 from verifiable_observability.core.metrics import BasicMetricsEngine
 from verifiable_observability.core.orchestrator import Orchestrator
 from verifiable_observability.core.rule_bank import RuleBank, StubRuleBank
 from verifiable_observability.core.strategy_profiler import StrategyProfiler
 from verifiable_observability.simulation.domains.finance.seed_rules import (
-    load_seed_rules_into_bank,
+    load_seed_rules_into_bank as load_finance_rules,
+)
+from verifiable_observability.simulation.domains.healthcare.seed_rules import (
+    load_seed_rules_into_bank as load_healthcare_rules,
+)
+from verifiable_observability.simulation.domains.code_execution.seed_rules import (
+    load_seed_rules_into_bank as load_code_exec_rules,
 )
 from verifiable_observability.storage.db import (
     RuleStore,
@@ -58,6 +65,9 @@ app.add_typer(analyze_app, name="analyze")
 
 regime_app = typer.Typer(help="Phase 5 — scripted behavioral regime runs")
 app.add_typer(regime_app, name="regime")
+
+domain_app = typer.Typer(help="Phase 6 — domain seed-rule management")
+app.add_typer(domain_app, name="domain")
 
 console = Console()
 
@@ -416,16 +426,14 @@ def run(
     rule_store = RuleStore(engine)
     rule_bank = RuleBank(rule_store)
 
-    if seed_rules and task_domain == Domain.FINANCE:
-        console.print("[dim]Loading Finance seed rules...[/dim]")
-        load_seed_rules_into_bank(rule_bank, auto_verify=True)
+    if seed_rules:
+        _load_seed_rules_for_domain(task_domain, rule_bank, console)
 
-    # Import the real Finance CCM; fall back to stub if not yet implemented
+    # Build CCM for the task's domain (Phase 6: multi-domain CCM selection)
     try:
-        from verifiable_observability.core.constraint_monitor import FinanceCCM
-        ccm = FinanceCCM()
-    except (ImportError, AttributeError):
-        console.print("[yellow]FinanceCCM not found — using StubCCM (no constraint checking).[/yellow]")
+        ccm = build_ccm(task_domain.value)
+    except KeyError:
+        console.print("[yellow]No CCM registered for this domain — using StubCCM.[/yellow]")
         ccm = StubCCM()
 
     orchestrator = Orchestrator(
@@ -708,15 +716,13 @@ def regime_run(
     rule_store = RuleStore(engine)
     rule_bank = RuleBank(rule_store)
 
-    if seed_rules and task_domain == Domain.FINANCE:
-        console.print("[dim]Loading Finance seed rules...[/dim]")
-        load_seed_rules_into_bank(rule_bank, auto_verify=True)
+    if seed_rules:
+        _load_seed_rules_for_domain(task_domain, rule_bank, console)
 
     try:
-        from verifiable_observability.core.constraint_monitor import FinanceCCM
-        ccm = FinanceCCM()
-    except (ImportError, AttributeError):
-        console.print("[yellow]FinanceCCM not found — using StubCCM.[/yellow]")
+        ccm = build_ccm(task_domain.value)
+    except KeyError:
+        console.print("[yellow]No CCM registered for this domain — using StubCCM.[/yellow]")
         ccm = StubCCM()
 
     task_description = (
@@ -844,6 +850,115 @@ def regime_list():
         )
 
     console.print(table)
+
+
+# ---------------------------------------------------------------------------
+# domain commands — Phase 6
+# ---------------------------------------------------------------------------
+
+
+_SEED_LOADERS = {
+    Domain.FINANCE: (load_finance_rules, "finance_seed_v1"),
+    Domain.HEALTHCARE: (load_healthcare_rules, "healthcare_seed_v1"),
+    Domain.CODE_EXECUTION: (load_code_exec_rules, "code_execution_seed_v1"),
+}
+
+
+def _load_seed_rules_for_domain(
+    domain: Domain,
+    rule_bank: RuleBank,
+    con: Console,
+) -> int:
+    """
+    Load seed rules for the given domain into the rule bank.
+
+    Returns the count of rules loaded.
+    """
+    entry = _SEED_LOADERS.get(domain)
+    if entry is None:
+        con.print(f"[yellow]No seed rules defined for domain '{domain.value}'.[/yellow]")
+        return 0
+    loader, label = entry
+    con.print(f"[dim]Loading {domain.value} seed rules ({label})...[/dim]")
+    loaded = loader(rule_bank, auto_verify=True)
+    return len(loaded)
+
+
+@domain_app.command("seed")
+def domain_seed(
+    domain_name: Annotated[
+        str,
+        typer.Argument(help="Domain to seed: finance | healthcare | code_execution"),
+    ],
+    db: Annotated[str, typer.Option(help="Path to SQLite DB")] = "verifiable_observability.db",
+    verify: Annotated[
+        bool,
+        typer.Option("--verify/--no-verify", help="Auto-verify all loaded rules."),
+    ] = True,
+):
+    """
+    [bold]Phase 6[/bold] — Load seed rules for a domain into the Rule Bank.
+
+    Idempotent: duplicate rules are silently skipped by the Rule Bank.
+
+    Example::
+
+        vo domain seed finance
+        vo domain seed healthcare
+        vo domain seed code_execution --no-verify
+    """
+    try:
+        dom = Domain(domain_name.lower())
+    except ValueError:
+        console.print(
+            f"[red]Unknown domain:[/] {domain_name!r}. "
+            "Choose from: finance, healthcare, code_execution"
+        )
+        raise typer.Exit(1)
+
+    engine = _get_engine(db)
+    rule_store = RuleStore(engine)
+    rule_bank = RuleBank(rule_store)
+
+    entry = _SEED_LOADERS.get(dom)
+    if entry is None:
+        console.print(f"[red]No seed loader found for domain:[/] {dom.value}")
+        raise typer.Exit(1)
+
+    loader, label = entry
+    console.rule(f"[bold cyan]Loading seed rules — {dom.value.upper()}[/]")
+    rules = loader(rule_bank, auto_verify=verify)
+
+    table = Table(title=f"{dom.value.title()} Seed Rules ({len(rules)} loaded)")
+    table.add_column("Rule ID", style="cyan")
+    table.add_column("Name")
+    table.add_column("Task Type")
+    table.add_column("Status")
+
+    status_colors = {
+        "verified": "green",
+        "pending": "yellow",
+        "deprecated": "red",
+    }
+    for r in rules:
+        s = r.verification_status.value
+        sc = status_colors.get(s, "white")
+        table.add_row(
+            r.rule_id,
+            r.name,
+            r.observation_pattern.task_type or "—",
+            f"[{sc}]{s}[/{sc}]",
+        )
+
+    console.print(table)
+    console.print(
+        Panel(
+            f"[bold green][OK] {len(rules)} rules seeded into '{dom.value}' domain.[/bold green]\n"
+            f"Auto-verified: [bold]{'Yes' if verify else 'No'}[/]\n"
+            f"DB: [cyan]{Path(db).resolve()}[/]",
+            title="Seed Complete",
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
