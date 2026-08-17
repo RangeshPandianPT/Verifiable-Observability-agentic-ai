@@ -64,7 +64,7 @@ class TestStrategyProfiler:
     def test_healthcare_domain(self, profiler):
         task = Task(
             domain=Domain.HEALTHCARE,
-            description="Analyze patient records."
+            description="Prescribe medication for patient PAT-001."
         )
         profile = profiler.classify(task)
         assert profile.domain == Domain.HEALTHCARE
