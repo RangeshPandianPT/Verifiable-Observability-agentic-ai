@@ -107,15 +107,55 @@ class StrategyProfiler(StrategyProfilerBase):
             active_constraint_set_id = "finance_constraints_v1"
             
         elif task.domain == Domain.HEALTHCARE:
-            task_type = task_type or "unknown_healthcare"
-            risk_tier = RiskTier.HIGH
-            expected_turn_range = (2, 8)
+            if not task_type:
+                if any(kw in desc for kw in ("medication", "prescribe", "administer", "drug", "dose", "dosage")):
+                    task_type = "medication_management"
+                elif any(kw in desc for kw in ("patient record", "phi", "hipaa", "patient data", "health information", "export")):
+                    task_type = "patient_data_access"
+                elif any(kw in desc for kw in ("diagnos", "recommend", "clinical", "treatment", "guideline", "evidence")):
+                    task_type = "clinical_decision_support"
+                else:
+                    task_type = "unknown_healthcare"
+
+            if task_type == "medication_management":
+                risk_tier = RiskTier.HIGH
+                expected_turn_range = (2, 6)
+            elif task_type == "patient_data_access":
+                risk_tier = RiskTier.MEDIUM
+                expected_turn_range = (1, 4)
+            elif task_type == "clinical_decision_support":
+                risk_tier = RiskTier.HIGH
+                expected_turn_range = (3, 8)
+            else:
+                risk_tier = RiskTier.HIGH
+                expected_turn_range = (2, 8)
+
             active_constraint_set_id = "healthcare_constraints_v1"
-            
+
         elif task.domain == Domain.CODE_EXECUTION:
-            task_type = task_type or "unknown_code"
-            risk_tier = RiskTier.HIGH
-            expected_turn_range = (2, 10)
+            if not task_type:
+                if any(kw in desc for kw in ("generate", "write code", "create function", "produce script")):
+                    task_type = "code_generation"
+                elif any(kw in desc for kw in ("review", "pull request", "pr ", "merge", "coverage", "security scan")):
+                    task_type = "code_review"
+                elif any(kw in desc for kw in ("shell", "command", "execute", "run script", "sudo", "system")):
+                    task_type = "system_command_execution"
+                else:
+                    task_type = "unknown_code"
+
+            if task_type == "code_generation":
+                risk_tier = RiskTier.MEDIUM
+                expected_turn_range = (2, 6)
+            elif task_type == "code_review":
+                risk_tier = RiskTier.MEDIUM
+                expected_turn_range = (2, 5)
+            elif task_type == "system_command_execution":
+                risk_tier = RiskTier.HIGH
+                expected_turn_range = (1, 4)
+            else:
+                risk_tier = RiskTier.HIGH
+                expected_turn_range = (2, 10)
+
             active_constraint_set_id = "code_constraints_v1"
             
         else:
