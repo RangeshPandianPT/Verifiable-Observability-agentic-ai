@@ -362,6 +362,7 @@ class BasicMetricsEngine(MetricsEngineBase):
                     "rcr_trend": report.rcr_trend.value,
                     "ccr_trend": report.ccr_trend.value,
                     "drift": "⚠ YES" if report.drift_detected else "OK",
+                    "failure_reason": traj.failure_reason,
                 }
             )
         return rows
