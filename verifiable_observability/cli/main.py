@@ -69,6 +69,9 @@ app.add_typer(regime_app, name="regime")
 domain_app = typer.Typer(help="Phase 6 — domain seed-rule management")
 app.add_typer(domain_app, name="domain")
 
+eval_app = typer.Typer(help="Phase 7 — evaluation harness")
+app.add_typer(eval_app, name="eval")
+
 console = Console()
 
 logging.basicConfig(
@@ -959,6 +962,54 @@ def domain_seed(
             title="Seed Complete",
         )
     )
+
+
+# ---------------------------------------------------------------------------
+# eval commands — Phase 7
+# ---------------------------------------------------------------------------
+
+
+@eval_app.command("sweep")
+def eval_sweep(
+    config: Annotated[str, typer.Option("--config", "-c", help="Path to config.yaml")] = "config.yaml",
+    db: Annotated[str, typer.Option(help="Path to SQLite DB")] = "verifiable_observability.db",
+):
+    """
+    [bold]Phase 7[/bold] — Run the evaluation sweep matrix defined in config.yaml.
+    
+    Generates combinations of domains, regimes, and models, runs them for the 
+    specified number of trajectories, and saves reproducible JSON reports.
+    """
+    from verifiable_observability.eval.harness import EvalHarness
+    
+    console.rule("[bold cyan]Phase 7 — Evaluation Harness Sweep[/]")
+    
+    try:
+        harness = EvalHarness(config_path=config, db_path=db, console=console)
+        report_path = harness.run_sweep()
+    except Exception as e:
+        console.print(f"[red]Evaluation sweep failed:[/] {e}")
+        raise typer.Exit(1)
+
+
+# ---------------------------------------------------------------------------
+# dashboard command — Phase 8
+# ---------------------------------------------------------------------------
+
+
+@app.command("dashboard")
+def dashboard(
+    host: Annotated[str, typer.Option(help="Host to bind to")] = "127.0.0.1",
+    port: Annotated[int, typer.Option(help="Port to bind to")] = 8000,
+    db: Annotated[str, typer.Option(help="Path to SQLite DB")] = "verifiable_observability.db",
+):
+    """
+    [bold]Phase 8[/bold] — Start the minimal web dashboard.
+    """
+    from verifiable_observability.dashboard import run_dashboard
+    
+    console.print(f"[bold green]Starting Dashboard on http://{host}:{port}[/bold green]")
+    run_dashboard(db_path=db, host=host, port=port)
 
 
 # ---------------------------------------------------------------------------
