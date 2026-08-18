@@ -108,6 +108,20 @@ class FinanceCCM(ConstraintComplianceMonitorBase):
         decision = ComplianceDecision.ALLOW
 
         # --- Hard: blocked tool names ---
+        # Input Guardrail Check (Phase 9)
+        if action.tool_name == "user_input_prompt":
+            prompt = str(action.parameters.get("prompt_text", "")).lower()
+            if "ignore all previous instructions" in prompt or "system prompt injection" in prompt:
+                violations.append(
+                    ViolatedConstraint(
+                        constraint_id="fin-hard-input-001",
+                        constraint_name="finance_prompt_injection_blocked",
+                        severity="hard",
+                        details="Malicious prompt injection detected and blocked."
+                    )
+                )
+                decision = ComplianceDecision.BLOCK
+
         if action.tool_name in _FINANCE_BLOCKED_TOOLS:
             violations.append(
                 ViolatedConstraint(
@@ -253,6 +267,31 @@ class HealthcareCCM(ConstraintComplianceMonitorBase):
             for a in t.actions
         ]
 
+        # --- NEW: Input Guardrail Check (Phase 9) ---
+        if action.tool_name == "user_input_prompt":
+            prompt = str(action.parameters.get("prompt_text", "")).lower()
+            if "ignore all previous instructions" in prompt or "system prompt injection" in prompt:
+                violations.append(
+                    ViolatedConstraint(
+                        constraint_id="hc-hard-input-001",
+                        constraint_name="healthcare_prompt_injection_blocked",
+                        severity="hard",
+                        details="Malicious prompt injection detected and blocked."
+                    )
+                )
+                decision = ComplianceDecision.BLOCK
+            # Example of blocking a prompt that explicitly tries to bypass safety
+            elif "without requesting a physician co-sign" in prompt or "bypass hipaa" in prompt:
+                violations.append(
+                    ViolatedConstraint(
+                        constraint_id="hc-hard-input-002",
+                        constraint_name="healthcare_safety_bypass_attempt",
+                        severity="hard",
+                        details="Attempt to bypass healthcare safety protocols in prompt."
+                    )
+                )
+                decision = ComplianceDecision.BLOCK
+
         # --- Hard: unconditionally blocked tools ---
         if action.tool_name in _HEALTHCARE_BLOCKED_TOOLS:
             violations.append(
@@ -383,6 +422,20 @@ class CodeExecutionCCM(ConstraintComplianceMonitorBase):
             for t in trajectory.turns
             for a in t.actions
         ]
+
+        # --- NEW: Input Guardrail Check (Phase 9) ---
+        if action.tool_name == "user_input_prompt":
+            prompt = str(action.parameters.get("prompt_text", "")).lower()
+            if "ignore all previous instructions" in prompt or "system prompt injection" in prompt:
+                violations.append(
+                    ViolatedConstraint(
+                        constraint_id="ce-hard-input-001",
+                        constraint_name="code_prompt_injection_blocked",
+                        severity="hard",
+                        details="Malicious prompt injection detected and blocked."
+                    )
+                )
+                decision = ComplianceDecision.BLOCK
 
         # --- Hard: unconditionally blocked tools ---
         if action.tool_name in _CODE_EXEC_BLOCKED_TOOLS:
