@@ -94,6 +94,23 @@ class Orchestrator:
             profile.risk_tier.value,
         )
 
+        # --- NEW: Phase 9 Input Guardrail Pre-flight Check ---
+        prompt_action = Action(
+            tool_name="user_input_prompt",
+            parameters={"prompt_text": task.description}
+        )
+        input_check = self.ccm.check(prompt_action, trajectory)
+        
+        if input_check.decision == ComplianceDecision.BLOCK:
+            logger.warning("Trajectory %s blocked at Input Guardrail", trajectory.trajectory_id[:8])
+            trajectory.outcome = TrajectoryOutcome.BLOCKED
+            trajectory.failure_reason = "Prompt Blocked by CCM: " + "; ".join(
+                v.details for v in input_check.violated_constraints
+            )
+            trajectory.completed_at = datetime.now(timezone.utc)
+            self.trajectory_store.save(trajectory)
+            return trajectory
+
         # Build a system prompt for the agent
         system_prompt = self._build_system_prompt(task, profile)
         conversation: list[dict] = []
