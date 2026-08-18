@@ -170,6 +170,18 @@ vo analyze trajectories --domain healthcare
 vo analyze trajectories --verbose
 ```
 
+### Evaluation Sweep (Phase 7)
+```bash
+# Run the experiment sweep matrix defined in config.yaml
+vo eval sweep --config config.yaml
+```
+
+### Minimal Dashboard (Phase 8)
+```bash
+# Start the minimal web dashboard to view trajectories
+vo dashboard --port 8000
+```
+
 ### Run tests
 ```bash
 pytest tests/ -v
@@ -188,8 +200,8 @@ pytest tests/ -v
 | 4 | ✅ Done | Real LLM wiring (Ollama local, Anthropic, OpenAI adapters) |
 | 5 | ✅ Done | Metrics Engine + Behavioral Regimes + Drift Detection |
 | 6 | ✅ Done | Healthcare & Code Execution domains |
-| 7 | ⬜ Next | Evaluation harness + reproducible results |
-| 8 | ⬜ | Optional: minimal dashboard |
+| 7 | ✅ Done | Evaluation harness + reproducible results |
+| 8 | ✅ Done | Minimal dashboard |
 
 ---
 
@@ -229,8 +241,11 @@ verifiable_observability/
 ├── storage/
 │   ├── models.py              # All Pydantic v2 schemas
 │   └── db.py                  # SQLite (SQLAlchemy Core) — TrajectoryStore, RuleStore
+├── eval/
+│   └── harness.py             # EvalHarness to run sweep matrices
+├── dashboard.py               # Phase 8 — Minimal FastAPI dashboard
 └── cli/
-    └── main.py                # Typer CLI: demo, run, rulebank, analyze, regime, domain
+    └── main.py                # Typer CLI: demo, run, rulebank, analyze, regime, domain, eval, dashboard
 tests/
 ├── test_smoke.py              # Phase 0 end-to-end smoke tests
 ├── test_rule_bank.py          # Phase 1 Rule Bank unit tests
@@ -238,7 +253,8 @@ tests/
 ├── test_llm_adapters.py       # Phase 4 adapter unit tests (cloud, mocked)
 ├── test_ollama_adapter.py     # Phase 4+ Ollama adapter + factory tests (mocked)
 ├── test_phase5_regimes.py     # Phase 5 regimes, drift detection, metrics tests
-└── test_phase6_domains.py     # Phase 6 Healthcare + Code Execution domain tests (68 tests)
+├── test_phase6_domains.py     # Phase 6 Healthcare + Code Execution domain tests (68 tests)
+└── test_phase7_eval.py        # Phase 7 eval harness tests
 config.yaml                    # Runtime config + Phase 7 experiment sweep matrix
 .env.example                   # Environment variable template
 ```
