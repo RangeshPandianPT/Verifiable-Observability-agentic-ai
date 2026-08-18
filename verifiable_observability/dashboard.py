@@ -7,8 +7,8 @@ from __future__ import annotations
 
 import os
 
-from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, Request, Form
+from fastapi.responses import HTMLResponse, RedirectResponse
 import uvicorn
 
 from verifiable_observability.core.metrics import BasicMetricsEngine
@@ -168,13 +168,65 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             transition: background 0.15s;
         }}
         .refresh-btn:hover {{ background: #2563eb; }}
+        
+        /* Form Styles */
+        .run-form {{
+            max-width: 1300px;
+            margin: 0 auto 24px;
+            background: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 12px;
+            padding: 16px 24px;
+            display: flex;
+            gap: 16px;
+        }}
+        .run-form input {{
+            flex: 1;
+            background: #0f172a;
+            border: 1px solid #334155;
+            border-radius: 8px;
+            padding: 12px 16px;
+            color: #e2e8f0;
+            font-size: 0.9rem;
+        }}
+        .run-form input:focus {{ outline: 2px solid #3b82f6; }}
+        .run-form select {{
+            background: #0f172a;
+            border: 1px solid #334155;
+            border-radius: 8px;
+            padding: 12px 16px;
+            color: #e2e8f0;
+            font-size: 0.9rem;
+        }}
+        .run-btn {{
+            background: #22c55e;
+            color: #0f172a;
+            border: none;
+            border-radius: 8px;
+            padding: 12px 24px;
+            font-weight: bold;
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: background 0.15s;
+        }}
+        .run-btn:hover {{ background: #16a34a; }}
     </style>
 </head>
 <body>
     <header>
         <h1>⚡ Verifiable Observability</h1>
-        <span class="badge">Phase 8 Dashboard</span>
+        <span class="badge">Phase 8/9 Dashboard</span>
     </header>
+
+    <form class="run-form" method="POST" action="/run_task">
+        <input type="text" name="prompt" placeholder="Type a prompt for the agent (e.g., 'Transfer $500 from ACC-001...')" required />
+        <select name="domain">
+            <option value="finance">Finance</option>
+            <option value="healthcare">Healthcare</option>
+            <option value="code_execution">Code Execution</option>
+        </select>
+        <button type="submit" class="run-btn">Run Agent</button>
+    </form>
 
     <div class="stats">
         <div class="stat-card">
@@ -272,6 +324,7 @@ def index(request: Request):
                 <th>RCR Trend</th>
                 <th>CCR Trend</th>
                 <th>Drift</th>
+                <th>Failure Reason</th>
             </tr>
         </thead>
         <tbody>
@@ -300,6 +353,7 @@ def index(request: Request):
             <td class="{rcr_trend_cls}">{r['rcr_trend']}</td>
             <td class="{ccr_trend_cls}">{r['ccr_trend']}</td>
             <td class="{drift_cls}">{r['drift']}</td>
+            <td><span style="color:#f87171; font-size:0.75rem;">{r.get('failure_reason') or ''}</span></td>
         </tr>
         """
 
@@ -312,6 +366,57 @@ def index(request: Request):
         drifted=drifted,
         table_or_empty=table_html,
     )
+
+@app.post("/run_task", response_class=RedirectResponse)
+async def run_task(prompt: str = Form(...), domain: str = Form(...)):
+    from verifiable_observability.core.orchestrator import Orchestrator
+    from verifiable_observability.agent.factory import build_adapter
+    from verifiable_observability.core.constraint_monitor import build_ccm, StubCCM
+    from verifiable_observability.core.rule_bank import RuleBank, StubRuleBank
+    from verifiable_observability.core.strategy_profiler import StrategyProfiler
+    from verifiable_observability.storage.db import RuleStore
+    from verifiable_observability.storage.models import Task, Domain
+
+    engine = create_db_engine(_DB_PATH)
+    traj_store = TrajectoryStore(engine)
+    rule_store = RuleStore(engine)
+    rule_bank = RuleBank(rule_store)
+
+    try:
+        task_domain = Domain(domain.lower())
+    except ValueError:
+        task_domain = Domain.UNKNOWN
+    
+    try:
+        ccm = build_ccm(task_domain.value)
+    except KeyError:
+        ccm = StubCCM()
+
+    # Use ollama backend now that the server is running locally
+    info = build_adapter("ollama")
+    
+    orchestrator = Orchestrator(
+        strategy_profiler=StrategyProfiler(),
+        rule_bank=rule_bank,
+        ccm=ccm,
+        agent_adapter=info.adapter,
+        trajectory_store=traj_store,
+        metrics_engine=BasicMetricsEngine(),
+        max_turns=5,
+        agent_backend=info.backend,
+        model_name=info.model_name,
+    )
+    
+    task = Task(
+        domain=task_domain,
+        description=prompt,
+    )
+    
+    # Run the orchestrator in the main thread (blocks for a bit, but fast with scripted backend)
+    orchestrator.run(task)
+    
+    # Redirect back to index
+    return RedirectResponse(url="/", status_code=303)
 
 
 def run_dashboard(
