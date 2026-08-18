@@ -109,10 +109,13 @@ def build_adapter(backend_override: str | None = None) -> AdapterInfo:
         return _build_anthropic(cfg)
     elif backend == "openai":
         return _build_openai(cfg)
+    elif backend == "scripted":
+        from verifiable_observability.agent.adapter import ScriptedAgentAdapter
+        return AdapterInfo(adapter=ScriptedAgentAdapter([]), backend="scripted", model_name="scripted")
     else:
         raise ValueError(
             f"Unknown agent_backend: {backend!r}. "
-            "Valid options: 'ollama', 'anthropic', 'openai'."
+            "Valid options: 'ollama', 'anthropic', 'openai', 'scripted'."
         )
 
 
