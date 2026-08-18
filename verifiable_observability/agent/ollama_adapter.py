@@ -219,6 +219,11 @@ class OllamaAgentAdapter(AgentAdapterBase):
         Tries native tool-calling first; falls back to JSON-prompt mode
         if the response contains no tool calls and json_action_fallback=True.
         """
+        from verifiable_observability.agent.tool_registry import get_tools_for_domain
+        
+        # Dynamically fetch the correct tools for this task's domain (Phase 6 fix)
+        self.tools = get_tools_for_domain(task.domain.value, backend="openai")
+        
         messages = self._build_messages(system_prompt, conversation, task)
 
         for attempt in range(self.max_retries + 1):
@@ -388,8 +393,8 @@ class OllamaAgentAdapter(AgentAdapterBase):
         if not isinstance(data, dict):
             raise _ParseError(f"Expected JSON object, got: {type(data).__name__}")
 
-        tool_name: str | None = data.get("tool_name") or None
-        parameters: dict[str, Any] = data.get("parameters") or {}
+        tool_name: str | None = data.get("tool_name") or data.get("name") or None
+        parameters: dict[str, Any] = data.get("parameters") or data.get("arguments") or {}
         reasoning: str = data.get("reasoning") or raw_text
 
         if not isinstance(parameters, dict):
