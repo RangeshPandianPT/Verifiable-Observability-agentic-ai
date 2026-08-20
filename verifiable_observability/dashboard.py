@@ -25,237 +25,474 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Verifiable Observability Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <style>
         *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
 
+        :root {{
+            --bg-color: #f8fafc;
+            --card-bg: #ffffff;
+            --border-color: #e2e8f0;
+            --text-main: #0f172a;
+            --text-muted: #64748b;
+            --text-subtle: #94a3b8;
+            --primary: #4f46e5;
+            --primary-hover: #4338ca;
+            --primary-light: #eef2ff;
+            --shadow-sm: 0 1px 3px 0 rgba(15, 23, 42, 0.05), 0 1px 2px -1px rgba(15, 23, 42, 0.03);
+            --shadow-md: 0 4px 6px -1px rgba(15, 23, 42, 0.05), 0 2px 4px -2px rgba(15, 23, 42, 0.04);
+        }}
+
         body {{
-            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
-            background: #0f1117;
-            color: #e2e8f0;
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
             min-height: 100vh;
-            padding: 24px;
+            padding: 32px 24px;
+            line-height: 1.5;
+        }}
+
+        .container {{
+            max-width: 1280px;
+            margin: 0 auto;
         }}
 
         header {{
-            max-width: 1300px;
-            margin: 0 auto 24px;
-            display: flex;
-            align-items: center;
-            gap: 16px;
-        }}
-        header h1 {{
-            font-size: 1.6rem;
-            font-weight: 700;
-            background: linear-gradient(90deg, #60a5fa, #a78bfa);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }}
-        .badge {{
-            background: #1e293b;
-            border: 1px solid #334155;
-            border-radius: 999px;
-            padding: 3px 12px;
-            font-size: 0.75rem;
-            color: #94a3b8;
-        }}
-
-        .stats {{
-            max-width: 1300px;
-            margin: 0 auto 24px;
-            display: flex;
-            gap: 16px;
-            flex-wrap: wrap;
-        }}
-        .stat-card {{
-            background: #1e293b;
-            border: 1px solid #334155;
-            border-radius: 12px;
-            padding: 16px 24px;
-            flex: 1;
-            min-width: 160px;
-        }}
-        .stat-label {{ font-size: 0.75rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; }}
-        .stat-value {{ font-size: 2rem; font-weight: 700; margin-top: 4px; }}
-
-        .card {{
-            max-width: 1300px;
-            margin: 0 auto;
-            background: #1e293b;
-            border: 1px solid #334155;
-            border-radius: 16px;
-            overflow: hidden;
-        }}
-        .card-header {{
-            padding: 16px 24px;
-            border-bottom: 1px solid #334155;
+            margin-bottom: 24px;
             display: flex;
             align-items: center;
             justify-content: space-between;
+            background: var(--card-bg);
+            padding: 20px 28px;
+            border-radius: 16px;
+            border: 1px solid var(--border-color);
+            box-shadow: var(--shadow-sm);
         }}
-        .card-header h2 {{ font-size: 1rem; font-weight: 600; color: #cbd5e1; }}
+
+        .brand {{
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }}
+
+        .brand-icon {{
+            width: 42px;
+            height: 42px;
+            background: linear-gradient(135deg, #4f46e5, #3b82f6);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #ffffff;
+            font-size: 1.25rem;
+            box-shadow: 0 4px 10px rgba(79, 70, 229, 0.25);
+        }}
+
+        .brand-title h1 {{
+            font-size: 1.4rem;
+            font-weight: 800;
+            color: var(--text-main);
+            letter-spacing: -0.02em;
+        }}
+
+        .brand-title p {{
+            font-size: 0.82rem;
+            color: var(--text-muted);
+            font-weight: 500;
+        }}
+
+        .badge {{
+            background: var(--primary-light);
+            border: 1px solid #c7d2fe;
+            border-radius: 9999px;
+            padding: 6px 14px;
+            font-size: 0.78rem;
+            font-weight: 600;
+            color: var(--primary);
+        }}
+
+        .run-form-card {{
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 20px 24px;
+            margin-bottom: 24px;
+            box-shadow: var(--shadow-sm);
+        }}
+
+        .form-label {{
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--text-muted);
+            margin-bottom: 10px;
+            display: block;
+        }}
+
+        .run-form {{
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }}
+
+        .run-form input {{
+            flex: 1;
+            min-width: 280px;
+            background: #ffffff;
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            padding: 12px 18px;
+            color: var(--text-main);
+            font-size: 0.9rem;
+            font-family: inherit;
+            transition: all 0.15s ease;
+        }}
+
+        .run-form input:focus {{
+            outline: none;
+            border-color: #6366f1;
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+        }}
+
+        .run-form select {{
+            background: #ffffff;
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            padding: 12px 18px;
+            color: var(--text-main);
+            font-size: 0.9rem;
+            font-family: inherit;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }}
+
+        .run-form select:focus {{
+            outline: none;
+            border-color: #6366f1;
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+        }}
+
+        .run-btn {{
+            background: linear-gradient(135deg, #4f46e5, #3b82f6);
+            color: #ffffff;
+            border: none;
+            border-radius: 10px;
+            padding: 12px 24px;
+            font-weight: 600;
+            font-size: 0.9rem;
+            font-family: inherit;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            box-shadow: 0 2px 6px rgba(79, 70, 229, 0.25);
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }}
+
+        .run-btn:hover {{
+            background: linear-gradient(135deg, #4338ca, #2563eb);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(79, 70, 229, 0.35);
+        }}
+
+        .stats {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 18px;
+            margin-bottom: 24px;
+        }}
+
+        .stat-card {{
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 20px 24px;
+            box-shadow: var(--shadow-sm);
+            position: relative;
+            overflow: hidden;
+            transition: transform 0.15s ease, box-shadow 0.15s ease;
+        }}
+
+        .stat-card:hover {{
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-md);
+        }}
+
+        .stat-card::before {{
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+        }}
+
+        .stat-card.total::before {{ background: #6366f1; }}
+        .stat-card.completed::before {{ background: #10b981; }}
+        .stat-card.blocked::before {{ background: #f43f5e; }}
+        .stat-card.drift::before {{ background: #f59e0b; }}
+
+        .stat-header {{
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }}
+
+        .stat-label {{
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            font-weight: 700;
+        }}
+
+        .stat-icon {{
+            font-size: 1.1rem;
+        }}
+
+        .stat-value {{
+            font-size: 2.25rem;
+            font-weight: 800;
+            letter-spacing: -0.03em;
+            line-height: 1.1;
+        }}
+
+        .card {{
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            box-shadow: var(--shadow-sm);
+            overflow: hidden;
+        }}
+
+        .card-header {{
+            padding: 20px 24px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: #ffffff;
+        }}
+
+        .card-header-title {{
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }}
+
+        .card-header h2 {{
+            font-size: 1.05rem;
+            font-weight: 700;
+            color: var(--text-main);
+        }}
+
+        .count-pill {{
+            background: #f1f5f9;
+            color: var(--text-muted);
+            font-size: 0.75rem;
+            font-weight: 600;
+            padding: 2px 10px;
+            border-radius: 9999px;
+        }}
+
+        .refresh-btn {{
+            background: #ffffff;
+            color: var(--text-muted);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 8px 16px;
+            font-size: 0.82rem;
+            font-weight: 600;
+            font-family: inherit;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }}
+
+        .refresh-btn:hover {{
+            background: #f8fafc;
+            color: var(--text-main);
+            border-color: #cbd5e1;
+        }}
+
+        .table-responsive {{
+            width: 100%;
+            overflow-x: auto;
+        }}
 
         table {{
             width: 100%;
             border-collapse: collapse;
-        }}
-        thead th {{
-            background: #0f172a;
-            padding: 12px 16px;
             text-align: left;
+        }}
+
+        thead th {{
+            background: #f8fafc;
+            padding: 14px 18px;
             font-size: 0.72rem;
-            font-weight: 600;
+            font-weight: 700;
             text-transform: uppercase;
             letter-spacing: 0.06em;
-            color: #64748b;
+            color: var(--text-muted);
+            border-bottom: 1px solid var(--border-color);
             white-space: nowrap;
         }}
+
         tbody tr {{
-            border-bottom: 1px solid #1e293b;
-            transition: background 0.15s;
+            border-bottom: 1px solid #f1f5f9;
+            transition: background-color 0.15s ease;
         }}
-        tbody tr:last-child {{ border-bottom: none; }}
-        tbody tr:hover {{ background: #263348; }}
+
+        tbody tr:last-child {{
+            border-bottom: none;
+        }}
+
+        tbody tr:hover {{
+            background-color: #f8fafc;
+        }}
+
         td {{
-            padding: 11px 16px;
+            padding: 14px 18px;
             font-size: 0.86rem;
-            color: #cbd5e1;
+            color: #334155;
+            vertical-align: middle;
         }}
-        .mono {{ font-family: 'Consolas', 'Monaco', monospace; font-size: 0.78rem; color: #94a3b8; }}
 
-        /* Outcome badges */
-        .badge-completed {{ background:#052e16; color:#4ade80; border:1px solid #166534; border-radius:6px; padding:2px 8px; font-size:0.75rem; font-weight:600; }}
-        .badge-blocked   {{ background:#450a0a; color:#f87171; border:1px solid #991b1b; border-radius:6px; padding:2px 8px; font-size:0.75rem; font-weight:600; }}
-        .badge-truncated {{ background:#1c1917; color:#fb923c; border:1px solid #92400e; border-radius:6px; padding:2px 8px; font-size:0.75rem; font-weight:600; }}
-        .badge-failed    {{ background:#450a0a; color:#f87171; border:1px solid #991b1b; border-radius:6px; padding:2px 8px; font-size:0.75rem; font-weight:600; }}
-        .badge-default   {{ background:#1e293b; color:#94a3b8; border:1px solid #334155; border-radius:6px; padding:2px 8px; font-size:0.75rem; }}
+        .mono {{
+            font-family: 'JetBrains Mono', 'Consolas', monospace;
+            font-size: 0.78rem;
+            background: #f1f5f9;
+            color: #475569;
+            padding: 3px 8px;
+            border-radius: 6px;
+            border: 1px solid #e2e8f0;
+            display: inline-block;
+        }}
 
-        /* Drift badge */
-        .drift-ok   {{ color:#4ade80; font-weight:600; }}
-        .drift-warn {{ color:#f87171; font-weight:700; }}
+        /* Badges */
+        .badge-completed {{ background: #dcfce7; color: #15803d; border: 1px solid #bbf7d0; border-radius: 9999px; padding: 4px 12px; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.02em; display: inline-block; }}
+        .badge-blocked   {{ background: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5; border-radius: 9999px; padding: 4px 12px; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.02em; display: inline-block; }}
+        .badge-truncated {{ background: #ffedd5; color: #c2410c; border: 1px solid #fed7aa; border-radius: 9999px; padding: 4px 12px; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.02em; display: inline-block; }}
+        .badge-failed    {{ background: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5; border-radius: 9999px; padding: 4px 12px; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.02em; display: inline-block; }}
+        .badge-default   {{ background: #f1f5f9; color: #64748b; border: 1px solid #e2e8f0; border-radius: 9999px; padding: 4px 12px; font-size: 0.72rem; font-weight: 600; display: inline-block; }}
 
-        /* Trend */
-        .trend-improving {{ color:#4ade80; }}
-        .trend-degrading {{ color:#f87171; }}
-        .trend-stable    {{ color:#94a3b8; }}
-        .trend-insufficient {{ color:#475569; }}
+        /* Metrics & Drift */
+        .drift-ok   {{ color: #16a34a; font-weight: 600; }}
+        .drift-warn {{ color: #dc2626; font-weight: 700; }}
 
-        .metric {{ font-weight: 600; }}
+        .trend-improving {{ color: #16a34a; font-weight: 600; }}
+        .trend-degrading {{ color: #dc2626; font-weight: 600; }}
+        .trend-stable    {{ color: #64748b; }}
+        .trend-insufficient {{ color: #94a3b8; }}
+
+        .metric {{ font-weight: 600; font-family: 'JetBrains Mono', monospace; font-size: 0.84rem; color: #1e293b; }}
 
         .empty-state {{
-            padding: 60px;
+            padding: 64px 24px;
             text-align: center;
-            color: #475569;
+            color: var(--text-muted);
+            background: #ffffff;
         }}
         .empty-state .icon {{ font-size: 3rem; margin-bottom: 12px; }}
-        .empty-state p {{ font-size: 0.9rem; }}
+        .empty-state p {{ font-size: 0.92rem; color: var(--text-muted); }}
+        .empty-state code {{
+            background: #f1f5f9;
+            border: 1px solid #e2e8f0;
+            color: #334155;
+            padding: 3px 8px;
+            border-radius: 6px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.82rem;
+        }}
 
         footer {{
-            max-width: 1300px;
-            margin: 24px auto 0;
-            font-size: 0.75rem;
-            color: #475569;
+            margin-top: 32px;
+            font-size: 0.78rem;
+            color: var(--text-subtle);
             text-align: center;
+            padding-bottom: 16px;
         }}
-
-        .refresh-btn {{
-            background: #1d4ed8;
-            color: white;
-            border: none;
-            border-radius: 8px;
-            padding: 6px 14px;
-            font-size: 0.8rem;
-            cursor: pointer;
-            transition: background 0.15s;
-        }}
-        .refresh-btn:hover {{ background: #2563eb; }}
-        
-        /* Form Styles */
-        .run-form {{
-            max-width: 1300px;
-            margin: 0 auto 24px;
-            background: #1e293b;
-            border: 1px solid #334155;
-            border-radius: 12px;
-            padding: 16px 24px;
-            display: flex;
-            gap: 16px;
-        }}
-        .run-form input {{
-            flex: 1;
-            background: #0f172a;
-            border: 1px solid #334155;
-            border-radius: 8px;
-            padding: 12px 16px;
-            color: #e2e8f0;
-            font-size: 0.9rem;
-        }}
-        .run-form input:focus {{ outline: 2px solid #3b82f6; }}
-        .run-form select {{
-            background: #0f172a;
-            border: 1px solid #334155;
-            border-radius: 8px;
-            padding: 12px 16px;
-            color: #e2e8f0;
-            font-size: 0.9rem;
-        }}
-        .run-btn {{
-            background: #22c55e;
-            color: #0f172a;
-            border: none;
-            border-radius: 8px;
-            padding: 12px 24px;
-            font-weight: bold;
-            font-size: 0.9rem;
-            cursor: pointer;
-            transition: background 0.15s;
-        }}
-        .run-btn:hover {{ background: #16a34a; }}
     </style>
 </head>
 <body>
-    <header>
-        <h1>⚡ Verifiable Observability</h1>
-        <span class="badge">Phase 8/9 Dashboard</span>
-    </header>
+    <div class="container">
+        <header>
+            <div class="brand">
+                <div class="brand-icon">⚡</div>
+                <div class="brand-title">
+                    <h1>Verifiable Observability</h1>
+                    <p>Real-Time Agent Trajectory & Behavioral Verification Engine</p>
+                </div>
+            </div>
+            <span class="badge">Phase 8/9 Dashboard</span>
+        </header>
 
-    <form class="run-form" method="POST" action="/run_task">
-        <input type="text" name="prompt" placeholder="Type a prompt for the agent (e.g., 'Transfer $500 from ACC-001...')" required />
-        <select name="domain">
-            <option value="finance">Finance</option>
-            <option value="healthcare">Healthcare</option>
-            <option value="code_execution">Code Execution</option>
-        </select>
-        <button type="submit" class="run-btn">Run Agent</button>
-    </form>
+        <div class="run-form-card">
+            <span class="form-label">Test Agent Prompt</span>
+            <form class="run-form" method="POST" action="/run_task">
+                <input type="text" name="prompt" placeholder="Type a prompt for the agent (e.g., 'Transfer $500 from ACC-001...')" required />
+                <select name="domain">
+                    <option value="finance">Finance Domain</option>
+                    <option value="healthcare">Healthcare Domain</option>
+                    <option value="code_execution">Code Execution Domain</option>
+                </select>
+                <button type="submit" class="run-btn">Run Agent</button>
+            </form>
+        </div>
 
-    <div class="stats">
-        <div class="stat-card">
-            <div class="stat-label">Total Trajectories</div>
-            <div class="stat-value" style="color:#60a5fa">{total}</div>
+        <div class="stats">
+            <div class="stat-card total">
+                <div class="stat-header">
+                    <span class="stat-label">Total Trajectories</span>
+                    <span class="stat-icon">📊</span>
+                </div>
+                <div class="stat-value" style="color: #4f46e5">{total}</div>
+            </div>
+            <div class="stat-card completed">
+                <div class="stat-header">
+                    <span class="stat-label">Completed</span>
+                    <span class="stat-icon">✅</span>
+                </div>
+                <div class="stat-value" style="color: #16a34a">{completed}</div>
+            </div>
+            <div class="stat-card blocked">
+                <div class="stat-header">
+                    <span class="stat-label">Blocked</span>
+                    <span class="stat-icon">🛡️</span>
+                </div>
+                <div class="stat-value" style="color: #dc2626">{blocked}</div>
+            </div>
+            <div class="stat-card drift">
+                <div class="stat-header">
+                    <span class="stat-label">Drift Detected</span>
+                    <span class="stat-icon">⚠️</span>
+                </div>
+                <div class="stat-value" style="color: #d97706">{drifted}</div>
+            </div>
         </div>
-        <div class="stat-card">
-            <div class="stat-label">Completed</div>
-            <div class="stat-value" style="color:#4ade80">{completed}</div>
+
+        <div class="card">
+            <div class="card-header">
+                <div class="card-header-title">
+                    <h2>Recent Trajectories</h2>
+                    <span class="count-pill">Last {total}</span>
+                </div>
+                <button class="refresh-btn" onclick="location.reload()">⟳ Refresh</button>
+            </div>
+            <div class="table-responsive">
+                {table_or_empty}
+            </div>
         </div>
-        <div class="stat-card">
-            <div class="stat-label">Blocked</div>
-            <div class="stat-value" style="color:#f87171">{blocked}</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-label">Drift Detected</div>
-            <div class="stat-value" style="color:#fb923c">{drifted}</div>
-        </div>
+
+        <footer>Verifiable Observability &mdash; Real-time behavioral verification for LLM agents</footer>
     </div>
-
-    <div class="card">
-        <div class="card-header">
-            <h2>Recent Trajectories (last {total})</h2>
-            <button class="refresh-btn" onclick="location.reload()">⟳ Refresh</button>
-        </div>
-        {table_or_empty}
-    </div>
-
-    <footer>Verifiable Observability &mdash; Real-time behavioral verification for LLM agents</footer>
 </body>
 </html>"""
 
@@ -343,7 +580,7 @@ def index(request: Request):
 
         tbody += f"""
         <tr>
-            <td class="mono">{r['trajectory_id']}</td>
+            <td><span class="mono">{r['trajectory_id']}</span></td>
             <td>{r['backend']} / <span class="mono">{r['model']}</span></td>
             <td>{r['regime']}</td>
             <td>{r['turns']}</td>
@@ -353,7 +590,7 @@ def index(request: Request):
             <td class="{rcr_trend_cls}">{r['rcr_trend']}</td>
             <td class="{ccr_trend_cls}">{r['ccr_trend']}</td>
             <td class="{drift_cls}">{r['drift']}</td>
-            <td><span style="color:#f87171; font-size:0.75rem;">{r.get('failure_reason') or ''}</span></td>
+            <td><span style="color:#dc2626; font-size:0.78rem; font-weight:500;">{r.get('failure_reason') or ''}</span></td>
         </tr>
         """
 
