@@ -83,6 +83,14 @@ class StrategyProfile(BaseModel):
     domain: Domain
     task_type: str  # e.g. "routine_transfer", "portfolio_rebalance"
     risk_tier: RiskTier
+    confidence: float = Field(
+        default=1.0, ge=0.0, le=1.0,
+        description="Classification confidence; low values trigger escalation.",
+    )
+    escalation_reason: str | None = Field(
+        default=None,
+        description="Reason the risk tier was escalated (None if no escalation).",
+    )
     expected_turn_range: tuple[int, int] = Field(
         description="(min_turns, max_turns) expected for this task type"
     )
@@ -209,6 +217,18 @@ class ViolatedConstraint(BaseModel):
     details: str
 
 
+class ExecutionTicket(BaseModel):
+    """Signed, short-TTL ticket proving a CCM ALLOW decision (TOCTOU fix)."""
+
+    ticket_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    action_hash: str  # SHA-256 hex digest of canonical action repr
+    trajectory_id: str
+    sequence_no: int
+    issued_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    expires_at: datetime
+    signature: str  # HMAC-SHA256 hex digest
+
+
 class ConstraintCheckResult(BaseModel):
     """Result of the Constraint Compliance Monitor's evaluation of an Action."""
 
@@ -216,6 +236,10 @@ class ConstraintCheckResult(BaseModel):
     decision: ComplianceDecision
     violated_constraints: list[ViolatedConstraint] = Field(default_factory=list)
     details: str = ""
+    execution_ticket: ExecutionTicket | None = Field(
+        default=None,
+        description="Signed ticket issued on ALLOW; must be validated before dispatch.",
+    )
     checked_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
