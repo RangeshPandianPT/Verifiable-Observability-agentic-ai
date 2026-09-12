@@ -6,6 +6,11 @@ Phase 3: FinanceCCM — Finance constraint set.
 Phase 6: HealthcareCCM — Healthcare constraint set.
          CodeExecutionCCM — Code Execution constraint set.
 
+Phase 1 additions (Execution Integrity):
+  - Signed execution tickets on every ALLOW decision.
+  - Integration with ConstraintLedger for velocity checks.
+  - Integration with ConstraintGraph for cross-agent inheritance.
+
 Decision outcomes:
     ALLOW  — action is safe to dispatch
     BLOCK  — hard constraint violated; action must NOT be dispatched
@@ -14,8 +19,16 @@ Decision outcomes:
 
 from __future__ import annotations
 
+import logging
 from abc import ABC, abstractmethod
 
+from verifiable_observability.core.constraint_graph import ConstraintGraph
+from verifiable_observability.core.constraint_ledger import (
+    ConstraintLedger,
+    FINANCE_VELOCITY_MAX_AMOUNT,
+    FINANCE_VELOCITY_MAX_COUNT,
+)
+from verifiable_observability.core.execution_ticket import TicketIssuer
 from verifiable_observability.storage.models import (
     Action,
     ComplianceDecision,
@@ -24,23 +37,89 @@ from verifiable_observability.storage.models import (
     ViolatedConstraint,
 )
 
+logger = logging.getLogger(__name__)
+
 
 class ConstraintComplianceMonitorBase(ABC):
     """Abstract interface for the Constraint Compliance Monitor."""
 
-    @abstractmethod
+    def __init__(
+        self,
+        ticket_issuer: TicketIssuer | None = None,
+        constraint_graph: ConstraintGraph | None = None,
+    ) -> None:
+        self._ticket_issuer = ticket_issuer
+        self._constraint_graph = constraint_graph
+
     def check(
-        self, action: Action, trajectory: Trajectory
+        self,
+        action: Action,
+        trajectory: Trajectory,
+        sequence_no: int = 0,
     ) -> ConstraintCheckResult:
         """
         Evaluate an action against all active constraints.
 
+        This base implementation handles cross-agent inheritance checks
+        and ticket issuance.  Subclasses implement ``_domain_check()``
+        for domain-specific constraint logic.
+
         Args:
-            action:     The Action the agent intends to dispatch.
-            trajectory: Current trajectory (provides context, history).
+            action:      The Action the agent intends to dispatch.
+            trajectory:  Current trajectory (provides context, history).
+            sequence_no: Monotonic sequence number within the trajectory.
 
         Returns:
             ConstraintCheckResult with ALLOW / BLOCK / FLAG decision.
+        """
+        # --- Cross-agent constraint graph check ---
+        if self._constraint_graph is not None:
+            if self._constraint_graph.is_tool_blocked_by_parent(
+                trajectory.trajectory_id, action.tool_name
+            ):
+                return ConstraintCheckResult(
+                    action_id=action.action_id,
+                    decision=ComplianceDecision.BLOCK,
+                    violated_constraints=[
+                        ViolatedConstraint(
+                            constraint_id="inherited-block-001",
+                            constraint_name="cross_agent_inherited_block",
+                            severity="hard",
+                            details=(
+                                f"Tool '{action.tool_name}' is blocked by a parent "
+                                "trajectory's constraint state."
+                            ),
+                        )
+                    ],
+                    details=(
+                        f"Tool '{action.tool_name}' blocked by parent trajectory "
+                        "constraint inheritance."
+                    ),
+                )
+
+        # --- Domain-specific checks ---
+        result = self._domain_check(action, trajectory)
+
+        # --- Issue execution ticket on ALLOW ---
+        if (
+            result.decision == ComplianceDecision.ALLOW
+            and self._ticket_issuer is not None
+        ):
+            ticket = self._ticket_issuer.issue(
+                action, trajectory.trajectory_id, sequence_no
+            )
+            result.execution_ticket = ticket
+
+        return result
+
+    @abstractmethod
+    def _domain_check(
+        self, action: Action, trajectory: Trajectory
+    ) -> ConstraintCheckResult:
+        """
+        Domain-specific constraint evaluation.
+
+        Subclasses implement this instead of ``check()`` directly.
         """
         ...
 
@@ -52,7 +131,7 @@ class StubCCM(ConstraintComplianceMonitorBase):
     Used in Phase 0 smoke tests. Replaced by the real CCM in Phase 3.
     """
 
-    def check(
+    def _domain_check(
         self, action: Action, trajectory: Trajectory
     ) -> ConstraintCheckResult:
         return ConstraintCheckResult(
@@ -64,7 +143,7 @@ class StubCCM(ConstraintComplianceMonitorBase):
 
 
 # ---------------------------------------------------------------------------
-# Finance CCM  (Phase 3 / Phase 6 — no change to existing logic)
+# Finance CCM  (Phase 3 / Phase 6 — enhanced with velocity checks)
 # ---------------------------------------------------------------------------
 
 # Hard-blocked tool calls in the Finance domain (regardless of parameters)
@@ -95,13 +174,26 @@ class FinanceCCM(ConstraintComplianceMonitorBase):
     Hard constraints (BLOCK):
       - Attempt to call a tool that is never permitted in Finance.
       - execute_transfer with amount_usd > 500 000 (no prior approval in trajectory).
+      - Velocity limit: multiple transfers summing to > $50k in a rolling window.
 
     Soft constraints (FLAG):
       - execute_transfer with amount_usd > 10 000 (should have compliance approval).
       - place_trade_order with quantity > 100 000 (unusually large order).
     """
 
-    def check(
+    def __init__(
+        self,
+        ticket_issuer: TicketIssuer | None = None,
+        constraint_graph: ConstraintGraph | None = None,
+        constraint_ledger: ConstraintLedger | None = None,
+    ) -> None:
+        super().__init__(
+            ticket_issuer=ticket_issuer,
+            constraint_graph=constraint_graph,
+        )
+        self._ledger = constraint_ledger
+
+    def _domain_check(
         self, action: Action, trajectory: Trajectory
     ) -> ConstraintCheckResult:
         violations: list[ViolatedConstraint] = []
@@ -179,6 +271,33 @@ class FinanceCCM(ConstraintComplianceMonitorBase):
                 if decision == ComplianceDecision.ALLOW:
                     decision = ComplianceDecision.FLAG
 
+            # --- Velocity check (Phase 2a) ---
+            if (
+                self._ledger is not None
+                and isinstance(amount, (int, float))
+                and decision != ComplianceDecision.BLOCK
+            ):
+                velocity = self._ledger.get_velocity(
+                    tool_name="execute_transfer",
+                )
+                projected_total = velocity.total_amount + amount
+                if projected_total > FINANCE_VELOCITY_MAX_AMOUNT:
+                    violations.append(
+                        ViolatedConstraint(
+                            constraint_id="fin-hard-003",
+                            constraint_name="finance_velocity_limit_exceeded",
+                            severity="hard",
+                            details=(
+                                f"Velocity limit exceeded: {velocity.count} prior "
+                                f"transfers totalling ${velocity.total_amount:,.0f} "
+                                f"+ current ${amount:,.0f} = ${projected_total:,.0f} "
+                                f"exceeds ${FINANCE_VELOCITY_MAX_AMOUNT:,.0f} "
+                                f"in {velocity.window_seconds}s window."
+                            ),
+                        )
+                    )
+                    decision = ComplianceDecision.BLOCK
+
         # --- Soft: very large trade ---
         if action.tool_name == "place_trade_order":
             qty = action.parameters.get("quantity", 0)
@@ -196,6 +315,20 @@ class FinanceCCM(ConstraintComplianceMonitorBase):
                 )
                 if decision == ComplianceDecision.ALLOW:
                     decision = ComplianceDecision.FLAG
+
+        # --- Record to ledger on ALLOW/FLAG ---
+        if (
+            self._ledger is not None
+            and action.tool_name == "execute_transfer"
+            and decision != ComplianceDecision.BLOCK
+        ):
+            amount = action.parameters.get("amount_usd", 0)
+            if isinstance(amount, (int, float)):
+                self._ledger.record_action(
+                    trajectory_id=trajectory.trajectory_id,
+                    tool_name="execute_transfer",
+                    amount=amount,
+                )
 
         details = (
             "; ".join(v.details for v in violations)
@@ -254,7 +387,7 @@ class HealthcareCCM(ConstraintComplianceMonitorBase):
         contraindication check in this trajectory.
     """
 
-    def check(
+    def _domain_check(
         self, action: Action, trajectory: Trajectory
     ) -> ConstraintCheckResult:
         violations: list[ViolatedConstraint] = []
@@ -411,7 +544,7 @@ class CodeExecutionCCM(ConstraintComplianceMonitorBase):
       - Executing code with network_access=True (should be policy-checked first).
     """
 
-    def check(
+    def _domain_check(
         self, action: Action, trajectory: Trajectory
     ) -> ConstraintCheckResult:
         violations: list[ViolatedConstraint] = []
@@ -546,12 +679,20 @@ _CCM_REGISTRY: dict[str, type[ConstraintComplianceMonitorBase]] = {
 }
 
 
-def build_ccm(domain_or_constraint_set: str) -> ConstraintComplianceMonitorBase:
+def build_ccm(
+    domain_or_constraint_set: str,
+    ticket_issuer: TicketIssuer | None = None,
+    constraint_graph: ConstraintGraph | None = None,
+    constraint_ledger: ConstraintLedger | None = None,
+) -> ConstraintComplianceMonitorBase:
     """
     Return the appropriate CCM instance for a given domain or constraint-set ID.
 
     Args:
         domain_or_constraint_set: e.g. "finance", "healthcare_constraints_v1", …
+        ticket_issuer:   Optional TicketIssuer for signed tickets.
+        constraint_graph: Optional ConstraintGraph for cross-agent inheritance.
+        constraint_ledger: Optional ConstraintLedger for velocity checks (Finance).
 
     Returns:
         A ConstraintComplianceMonitorBase instance.
@@ -565,4 +706,16 @@ def build_ccm(domain_or_constraint_set: str) -> ConstraintComplianceMonitorBase:
             f"No CCM registered for '{domain_or_constraint_set}'. "
             f"Available: {sorted(_CCM_REGISTRY)}"
         )
-    return _CCM_REGISTRY[key]()
+    ccm_class = _CCM_REGISTRY[key]
+
+    # FinanceCCM accepts an extra constraint_ledger kwarg
+    if ccm_class is FinanceCCM:
+        return ccm_class(
+            ticket_issuer=ticket_issuer,
+            constraint_graph=constraint_graph,
+            constraint_ledger=constraint_ledger,
+        )
+    return ccm_class(
+        ticket_issuer=ticket_issuer,
+        constraint_graph=constraint_graph,
+    )
