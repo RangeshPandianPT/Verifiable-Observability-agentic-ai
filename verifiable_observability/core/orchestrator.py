@@ -15,6 +15,7 @@ Flow per turn:
 from __future__ import annotations
 
 import logging
+import concurrent.futures
 from datetime import datetime, timezone
 
 from verifiable_observability.agent.adapter import AgentAdapterBase
@@ -80,6 +81,9 @@ class Orchestrator:
         self.max_turns = max_turns
         self.agent_backend = agent_backend
         self.model_name = model_name
+        
+        # Thread pool for asynchronous semantic checks (Phase 4)
+        self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
     def run(self, task: Task) -> Trajectory:
         """
@@ -169,15 +173,21 @@ class Orchestrator:
             if intended_action:
                 turn.actions.append(intended_action)
 
-            # --- 3. Rule Bank check ---
-            rule_check = self.rule_bank.check(decision)
-            turn.rule_checks.append(rule_check)
-            logger.debug(
-                "RuleCheck: matched=%s confidence=%.2f method=%s",
-                rule_check.matched,
-                rule_check.confidence,
-                rule_check.match_method,
-            )
+            # --- 3. Rule Bank check (Semantic) ---
+            # Phase 4: Asynchronous Semantic Path for LOW/MEDIUM risk tasks
+            rule_check_future = None
+            if profile.risk_tier in (RiskTier.LOW, RiskTier.MEDIUM):
+                logger.debug("Dispatching semantic Rule Bank check asynchronously.")
+                rule_check_future = self._executor.submit(self.rule_bank.check, decision)
+            else:
+                rule_check = self.rule_bank.check(decision)
+                turn.rule_checks.append(rule_check)
+                logger.debug(
+                    "RuleCheck (Sync): matched=%s confidence=%.2f method=%s",
+                    rule_check.matched,
+                    rule_check.confidence,
+                    rule_check.match_method,
+                )
 
             # --- 4. CCM check (only if there's an action) ---
             if intended_action:
@@ -251,6 +261,22 @@ class Orchestrator:
             # --- 5. Simulated dispatch ---
             if intended_action:
                 turn.tool_result = self._simulate_dispatch(intended_action)
+
+            # --- 5b. Collect Asynchronous Semantic Check (Phase 4) ---
+            if rule_check_future is not None:
+                try:
+                    rule_check = rule_check_future.result(timeout=5.0)
+                    turn.rule_checks.append(rule_check)
+                    logger.debug(
+                        "RuleCheck (Async): matched=%s confidence=%.2f method=%s",
+                        rule_check.matched,
+                        rule_check.confidence,
+                        rule_check.match_method,
+                    )
+                except Exception as exc:
+                    logger.error("Asynchronous semantic check failed: %s", exc)
+                    # For safety, we can append a failed RuleCheckResult or skip
+                    # skipping will result in None RCR for this turn
 
             # --- 6. Metrics ---
             self.metrics_engine.record_turn(turn)
