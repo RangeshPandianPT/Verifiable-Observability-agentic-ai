@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 import sqlalchemy as sa
+from cryptography.fernet import Fernet
 from pydantic import BaseModel
 from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.pool import StaticPool
@@ -38,7 +39,14 @@ trajectories_table = sa.Table(
     sa.Column("outcome", sa.String, nullable=False, index=True),
     sa.Column("created_at", sa.String, nullable=False),
     sa.Column("completed_at", sa.String, nullable=True),
-    sa.Column("data", sa.Text, nullable=False),  # full JSON blob
+    sa.Column("data", sa.Text, nullable=False),  # full JSON blob (encrypted)
+)
+
+encryption_keys_table = sa.Table(
+    "encryption_keys",
+    metadata,
+    sa.Column("trajectory_id", sa.String, primary_key=True),
+    sa.Column("key", sa.String, nullable=False),
 )
 
 rules_table = sa.Table(
@@ -99,7 +107,13 @@ class TrajectoryStore:
         self._engine = engine
 
     def save(self, trajectory: Trajectory) -> None:
-        """Insert or replace a trajectory."""
+        """Insert or replace a trajectory (encrypted)."""
+        key = Fernet.generate_key()
+        f = Fernet(key)
+        
+        data_json = trajectory.model_dump_json()
+        encrypted_data = f.encrypt(data_json.encode('utf-8')).decode('utf-8')
+        
         row = {
             "trajectory_id": trajectory.trajectory_id,
             "task_id": trajectory.task.task_id,
@@ -111,7 +125,7 @@ class TrajectoryStore:
                 if trajectory.completed_at
                 else None
             ),
-            "data": trajectory.model_dump_json(),
+            "data": encrypted_data,
         }
         with self._engine.begin() as conn:
             # upsert: delete + insert (SQLite compatible)
@@ -121,19 +135,67 @@ class TrajectoryStore:
                 )
             )
             conn.execute(trajectories_table.insert().values(**row))
+            
+            # upsert encryption key
+            conn.execute(
+                encryption_keys_table.delete().where(
+                    encryption_keys_table.c.trajectory_id == trajectory.trajectory_id
+                )
+            )
+            conn.execute(
+                encryption_keys_table.insert().values(
+                    trajectory_id=trajectory.trajectory_id,
+                    key=key.decode('utf-8')
+                )
+            )
         logger.debug("Saved trajectory %s", trajectory.trajectory_id)
 
     def load(self, trajectory_id: str) -> Trajectory | None:
-        """Load a Trajectory by ID, or None if not found."""
+        """Load a Trajectory by ID, decrypting it. Raises ValueError if shredded."""
         with self._engine.connect() as conn:
             row = conn.execute(
                 trajectories_table.select().where(
                     trajectories_table.c.trajectory_id == trajectory_id
                 )
             ).fetchone()
-        if row is None:
-            return None
-        return Trajectory.model_validate_json(row.data)
+            
+            if row is None:
+                return None
+            
+            key_row = conn.execute(
+                encryption_keys_table.select().where(
+                    encryption_keys_table.c.trajectory_id == trajectory_id
+                )
+            ).fetchone()
+            
+            if key_row is None:
+                raise ValueError(f"Crypto-shredded: No decryption key found for trajectory {trajectory_id}")
+            
+            f = Fernet(key_row.key.encode('utf-8'))
+            try:
+                decrypted_data = f.decrypt(row.data.encode('utf-8')).decode('utf-8')
+            except Exception as e:
+                # Fallback for unencrypted older rows if needed
+                try:
+                    return Trajectory.model_validate_json(row.data)
+                except Exception:
+                    raise ValueError(f"Failed to decrypt data for trajectory {trajectory_id}: {e}")
+                
+        return Trajectory.model_validate_json(decrypted_data)
+
+    def crypto_shred(self, trajectory_id: str) -> bool:
+        """
+        Permanently delete the decryption key for a specific record, destroying 
+        the content while keeping the hash-chain integrity of the audit log intact.
+        Returns True if a key was deleted, False otherwise.
+        """
+        with self._engine.begin() as conn:
+            result = conn.execute(
+                encryption_keys_table.delete().where(
+                    encryption_keys_table.c.trajectory_id == trajectory_id
+                )
+            )
+            return result.rowcount > 0
 
     def list_trajectories(
         self,
