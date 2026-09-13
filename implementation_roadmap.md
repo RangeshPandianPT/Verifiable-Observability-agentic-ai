@@ -7,37 +7,37 @@ This document provides a phased, actionable implementation plan to address the a
 ## Phase 0: Foundations & Literature Catch-up
 *Goal: Fix paper-blocking theoretical issues before writing more code.*
 
-- [ ] **Unify Terminology:** Decide between "Rule Compliance Rate" and "Reasoning Consistency Ratio" for the RCR acronym. Update all documentation and code to use the single chosen term.
-- [ ] **Formal Definitions:** Write down the exact mathematical formalizations for RCR and CCR (i.e., exact numerators, denominators, and bounding constraints).
-- [ ] **Literature Survey Update:** Incorporate the 2026 papers on constraint drift, multi-agent delegation safety, and the "verifier tax" (e.g., AgentSpec, Pro²Guard, Safe Bilevel Delegation) into the project's background research to correctly position its novelty.
+- [x] **Unify Terminology:** Decide between "Rule Compliance Rate" and "Reasoning Consistency Ratio" for the RCR acronym. Update all documentation and code to use the single chosen term.
+- [x] **Formal Definitions:** Write down the exact mathematical formalizations for RCR and CCR (i.e., exact numerators, denominators, and bounding constraints).
+- [x] **Literature Survey Update:** Incorporate the 2026 papers on constraint drift, multi-agent delegation safety, and the "verifier tax" (e.g., AgentSpec, Pro²Guard, Safe Bilevel Delegation) into the project's background research to correctly position its novelty.
 
 ---
 
 ## Phase 1: Symbolic Core & Execution Integrity (Single Domain)
 *Goal: Prove the deterministic fast path works securely, starting with the Finance domain.*
 
-- [ ] **Implement Deterministic Checks:** Refactor the `FinanceCCM` to rely strictly on code-based, symbolic rules (e.g., dollar amount thresholds) rather than LLM-judged criteria for critical constraints.
-- [ ] **Implement Signed Execution Tickets (TOCTOU Fix):** 
+- [x] **Implement Deterministic Checks:** Refactor the `FinanceCCM` to rely strictly on code-based, symbolic rules (e.g., dollar amount thresholds) rather than LLM-judged criteria for critical constraints.
+- [x] **Implement Signed Execution Tickets (TOCTOU Fix):** 
   - Modify the Constraint Compliance Monitor (CCM) to compute a canonical hash over the approved action (tool name, parameters, trajectory ID, monotonic sequence number).
   - Issue a short-TTL, signed execution ticket (HMAC or Ed25519) alongside the `ALLOW` decision.
   - Require the execution engine to validate this ticket immediately prior to executing the tool.
-- [ ] **Risk-Tier-Aware Fail-Safe Policy:** 
+- [x] **Risk-Tier-Aware Fail-Safe Policy:** 
   - Add explicit fail-open/fail-closed behaviors to `constraint_monitor.py`.
   - HIGH risk tasks must fail-closed (block) on CCM unavailability.
   - LOW risk tasks should fail-open with mandatory async audit logging.
-- [ ] **Chaos Testing:** Introduce tests that intentionally kill or time-out the CCM to verify the fail-safe policies act as intended.
+- [x] **Chaos Testing:** Introduce tests that intentionally kill or time-out the CCM to verify the fail-safe policies act as intended.
 
 ---
 
 ## Phase 2: Statefulness & Risk Calibration
 *Goal: Close structural gaps regarding memory and decision confidence.*
 
-- [ ] **Stateful Constraint Ledger:**
+- [x] **Stateful Constraint Ledger:**
   - Implement a fast-lookup ledger (e.g., simulated Redis) that aggregates actions over a rolling window.
   - Add velocity checks to `FinanceCCM` (e.g., blocking 10 transfers of $4,999 to bypass a $50k limit).
-- [ ] **Cross-Agent Constraint Graph:** 
+- [x] **Cross-Agent Constraint Graph:** 
   - Create a shared mechanism where delegated intents inherit the parent task's constraint state, preventing an agent from simply asking a sub-agent to perform a blocked action.
-- [ ] **Confidence-Aware Strategy Profiler:** 
+- [x] **Confidence-Aware Strategy Profiler:** 
   - Update `strategy_profiler.py` to output a calibrated confidence score alongside its LOW/MEDIUM/HIGH risk tier.
   - Implement an "escalate-on-uncertainty" fallback (treat as a higher tier if confidence is low).
   - Add deterministic keyword/regex cross-checks that automatically force a HIGH tier regardless of the LLM's classification.
@@ -47,20 +47,20 @@ This document provides a phased, actionable implementation plan to address the a
 ## Phase 3: Metrics Engine v2
 *Goal: Replace OLS drift detection with rigorous statistical modeling and attribution.*
 
-- [ ] **Beta-Binomial Modeling:** Update `metrics.py` to model RCR/CCR turn-outcomes as Beta-Binomial rather than standard Gaussian residuals.
-- [ ] **Proper Changepoint Detection:** Replace the OLS slope estimation with a robust changepoint method like CUSUM or Bayesian Online Changepoint Detection (BOCPD).
-- [ ] **Drift Attribution:** Decompose the drift metric by rule-ID and tool-ID, so alerts can specify *which* rule compliance is degrading.
-- [ ] **Validation:** Create tests that synthetically inject drift (gradually worsening compliance) and measure the precision/recall of the new drift detector.
+- [x] **Beta-Binomial Modeling:** Update `metrics.py` to model RCR/CCR turn-outcomes as Beta-Binomial rather than standard Gaussian residuals.
+- [x] **Proper Changepoint Detection:** Replace the OLS slope estimation with a robust changepoint method like CUSUM or Bayesian Online Changepoint Detection (BOCPD).
+- [x] **Drift Attribution:** Decompose the drift metric by rule-ID and tool-ID, so alerts can specify *which* rule compliance is degrading.
+- [x] **Validation:** Create tests that synthetically inject drift (gradually worsening compliance) and measure the precision/recall of the new drift detector.
 
 ---
 
 ## Phase 4: Cross-Domain Extension & Compliance
 *Goal: Generalize the core architecture and ensure legal data handling.*
 
-- [ ] **Expand Domains:** Implement `HealthcareCCM` and `CodeExecutionCCM` using the same deterministic DSL and core as the Finance domain.
-- [ ] **Field-Level Encryption:** Update `storage/db.py` to encrypt sensitive payloads (like PHI in Healthcare) using per-record keys before saving to SQLite.
-- [ ] **Crypto-Shredding:** Implement a mechanism to permanently delete the decryption key for a specific record, destroying the content while keeping the hash-chain integrity of the audit log intact (satisfying right-to-erasure laws).
-- [ ] **Asynchronous Semantic Path:** Split the execution pipeline so heavy semantic checks run asynchronously for LOW/MEDIUM risk tasks, while symbolic checks run synchronously.
+- [x] **Expand Domains:** Implement `HealthcareCCM` and `CodeExecutionCCM` using the same deterministic DSL and core as the Finance domain.
+- [x] **Field-Level Encryption:** Update `storage/db.py` to encrypt sensitive payloads (like PHI in Healthcare) using per-record keys before saving to SQLite.
+- [x] **Crypto-Shredding:** Implement a mechanism to permanently delete the decryption key for a specific record, destroying the content while keeping the hash-chain integrity of the audit log intact (satisfying right-to-erasure laws).
+- [x] **Asynchronous Semantic Path:** Split the execution pipeline so heavy semantic checks run asynchronously for LOW/MEDIUM risk tasks, while symbolic checks run synchronously.
 
 ---
 
