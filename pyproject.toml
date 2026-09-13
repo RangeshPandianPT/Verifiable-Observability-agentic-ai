@@ -24,6 +24,7 @@ dependencies = [
     "plotly>=5.22.0",
     "pyyaml>=6.0.1",
     "python-dotenv>=1.0.1",
+    "cryptography>=42.0.0",
 ]
 
 [project.optional-dependencies]
