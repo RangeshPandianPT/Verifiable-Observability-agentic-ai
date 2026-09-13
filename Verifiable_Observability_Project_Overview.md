@@ -8,6 +8,11 @@ As AI agents become more autonomous, they are being deployed in high-stakes doma
 ### The Solution
 **Verifiable Observability** is a runtime monitoring and enforcement framework for AI agents. It does not just let the agent run wild; it actively wraps the agent in a verification layer. It observes the agent's reasoning, grades its compliance against predefined rules, and uses a hard constraint system to block unsafe actions before they happen.
 
+### Literature Survey & Novelty
+Recent work in 2026 has increasingly focused on AI agent safety. Frameworks like **AgentSpec** introduce formal specification checking for agent plans, while **Pro²Guard** focuses on proactive prompt-based guardrails. Additionally, work on **Safe Bilevel Delegation** addresses the risks of multi-agent delegation safety where a parent agent delegates harmful intents to a sub-agent. A recurring challenge in these systems is the **"verifier tax"**—the reduction in task success rates (utility) caused by overly strict safety monitors (false-blocks). 
+
+*Verifiable Observability* distinguishes itself by explicitly tracking **constraint drift** over time, providing a dual-metric approach (RCR and CCR) to distinguish between degraded reasoning and outright safety violations. It models the verifier tax by generating a safety-utility Pareto curve, allowing operators to calibrate the exact trade-off between task completion rates and adversarial robustness.
+
 ---
 
 ## 2. Core Architecture (How it Works)
@@ -21,7 +26,7 @@ The system is built on a "Turn-Based Agent Loop." Before any tool or action is e
    - **FLAG**: Suspicious or requires human review (e.g., a transfer of $15,000).
    - **BLOCK**: Hard policy violation (e.g., deleting a database or prescribing a controlled substance without a co-sign). The action is stopped immediately.
 4. **Metrics Engine (RCR & CCR)**: 
-   - **Rule Compliance Rate (RCR)**: Measures how well the agent's reasoning aligned with the expected SOP (0.0 to 1.0).
+   - **Reasoning Consistency Ratio (RCR)**: Measures how well the agent's reasoning aligned with the expected SOP (0.0 to 1.0).
    - **Constraint Compliance Rate (CCR)**: Measures whether the agent triggered any CCM violations (0.0 to 1.0).
 5. **Trajectory Store (SQLite Database)**: Every thought, action, rule match, and metric is saved permanently. This ensures total auditability if something goes wrong.
 
