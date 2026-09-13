@@ -28,9 +28,11 @@ Agent Action ───► [CCM] ──────────► ConstraintChec
 2. **Rule Bank** — checks every Decision against verified observation→action rules; tracks RCR
 3. **Constraint Compliance Monitor (CCM)** — enforces hard/soft safety constraints before dispatch; tracks CCR
 
-**Metrics:**
-- **RCR** (Reasoning Consistency Ratio) = matched decisions / total decisions per turn
-- **CCR** (Constraint Compliance Ratio) = ALLOW actions / total actions per turn
+**Metrics and Formal Definitions:**
+- **RCR** (Reasoning Consistency Ratio) = `(Number of Reasoning Steps Mapped to Verifiable Rules) / (Total Number of Extracted Reasoning Steps in Turn)`
+  - *Bounds*: 0.0 to 1.0. A score of 1.0 indicates perfect alignment between internal reasoning and external SOPs.
+- **CCR** (Constraint Compliance Ratio) = `(Number of Tool Arguments Passing Constraint Checks) / (Total Number of Tool Arguments Provided in Turn)`
+  - *Bounds*: 0.0 to 1.0. A score of 1.0 indicates no hard/soft safety violations during execution.
 
 ---
 
