@@ -67,16 +67,16 @@ This document provides a phased, actionable implementation plan to address the a
 ## Phase 5: Adversarial Hardening
 *Goal: Close advanced security vulnerabilities.*
 
-- [ ] **Information-Flow Tracking (Taint Labels):** Add a mechanism to tag data originating from untrusted sources (e.g., an external email) and track those labels through to the tool-call arguments. Block/flag actions where sensitive tool arguments are tainted.
-- [ ] **Human-in-the-loop Feedback:** Capture human decisions on `FLAG` escalations and feed them back into the system to calibrate the classifiers and update the Rule Bank.
-- [ ] **Automated Red-Teaming:** Set up a sandbox loop where an adversarial agent generates attacks (outside of the design-time training set) to continuously test the CCM.
+- `[x]` **Information-Flow Tracking (Taint Labels):** Add a mechanism to tag data originating from untrusted sources (e.g., an external email) and track those labels through to the tool-call arguments. Block/flag actions where sensitive tool arguments are tainted.
+- `[x]` **Human-in-the-loop Feedback:** Capture human decisions on `FLAG` escalations and feed them back into the system to calibrate the classifiers and update the Rule Bank.
+- `[x]` **Automated Red-Teaming:** Set up a sandbox loop where an adversarial agent generates attacks (outside of the design-time training set) to continuously test the CCM.
 
 ---
 
 ## Phase 6: Scaling & Evaluation
 *Goal: Prepare the system for performance claims and publication.*
 
-- [ ] **Meta-Observability Dashboard:** Add tracking for the safety system's own health (CCM latency, profiler confidence drift, false-block rates).
-- [ ] **Scale Argument Prototyping:** Document the Kafka/Flink/ClickHouse target architecture. Perform load testing on the synchronous check path (10k-100k simulated calls) to provide extrapolated latency/throughput numbers.
-- [ ] **Safety-Utility Tradeoff Measurement:** Design experiments to capture the "verifier tax"—measure both the attack success rate reduction *and* the false-block rate (task completion rate on benign tasks).
-- [ ] **Pareto Curve Generation:** Vary the strictness of the CCM and plot the safety vs. utility Pareto frontier as a headline empirical result.
+- `[x]` **Meta-Observability Dashboard:** Add tracking for the safety system's own health (CCM latency, profiler confidence drift, false-block rates).
+- `[x]` **Scale Argument Prototyping:** Document the Kafka/Flink/ClickHouse target architecture. Perform load testing on the synchronous check path (10k-100k simulated calls) to provide extrapolated latency/throughput numbers.
+- `[x]` **Safety-Utility Tradeoff Measurement:** Design experiments to capture the "verifier tax"—measure both the attack success rate reduction *and* the false-block rate (task completion rate on benign tasks).
+- `[x]` **Pareto Curve Generation:** Vary the strictness of the CCM and plot the safety vs. utility Pareto frontier as a headline empirical result.
