@@ -173,6 +173,7 @@ class Action(BaseModel):
     tool_name: str
     parameters: dict[str, Any] = Field(default_factory=dict)
     raw_text: str = ""  # agent's raw output text, if applicable
+    taint_labels: list[str] = Field(default_factory=list, description="Tags indicating untrusted data sources (e.g., 'external_email')")
 
 
 class Decision(BaseModel):
