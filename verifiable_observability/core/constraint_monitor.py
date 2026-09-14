@@ -228,6 +228,18 @@ class FinanceCCM(ConstraintComplianceMonitorBase):
             )
             decision = ComplianceDecision.BLOCK
 
+        # --- Phase 5: Information-Flow Tracking (Taint Labels) ---
+        if action.tool_name == "execute_transfer" and "external_untrusted" in action.taint_labels:
+            violations.append(
+                ViolatedConstraint(
+                    constraint_id="fin-hard-taint-001",
+                    constraint_name="finance_tainted_transfer",
+                    severity="hard",
+                    details="Attempted transfer using untrusted data (tainted by external source)."
+                )
+            )
+            decision = ComplianceDecision.BLOCK
+
         # --- Hard: mega-transfer without prior approval ---
         if action.tool_name == "execute_transfer":
             amount = action.parameters.get("amount_usd", 0)
@@ -440,6 +452,18 @@ class HealthcareCCM(ConstraintComplianceMonitorBase):
             )
             decision = ComplianceDecision.BLOCK
 
+        # --- Phase 5: Information-Flow Tracking (Taint Labels) ---
+        if action.tool_name in ["update_patient_record", "prescribe_medication"] and "external_untrusted" in action.taint_labels:
+            violations.append(
+                ViolatedConstraint(
+                    constraint_id="hc-hard-taint-001",
+                    constraint_name="healthcare_tainted_update",
+                    severity="hard",
+                    details=f"Attempted to update sensitive record or prescribe using untrusted data (tainted)."
+                )
+            )
+            decision = ComplianceDecision.BLOCK
+
         # --- Hard: controlled substance without physician cosign ---
         if action.tool_name in _CONTROLLED_SUBSTANCE_TOOLS:
             if "request_physician_cosign" not in prior_tools:
@@ -581,6 +605,18 @@ class CodeExecutionCCM(ConstraintComplianceMonitorBase):
                         f"Tool '{action.tool_name}' is unconditionally blocked "
                         "in the Code Execution domain."
                     ),
+                )
+            )
+            decision = ComplianceDecision.BLOCK
+
+        # --- Phase 5: Information-Flow Tracking (Taint Labels) ---
+        if action.tool_name in _CMD_EXEC_TOOLS and "external_untrusted" in action.taint_labels:
+            violations.append(
+                ViolatedConstraint(
+                    constraint_id="ce-hard-taint-001",
+                    constraint_name="code_exec_tainted_command",
+                    severity="hard",
+                    details="Attempted to execute a command containing untrusted data (tainted)."
                 )
             )
             decision = ComplianceDecision.BLOCK
