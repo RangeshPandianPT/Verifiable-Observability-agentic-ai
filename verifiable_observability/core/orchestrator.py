@@ -28,6 +28,7 @@ from verifiable_observability.core.fail_safe import apply_fail_safe, get_fail_sa
 from verifiable_observability.core.metrics import BasicMetricsEngine, MetricsEngineBase
 from verifiable_observability.core.rule_bank import RuleBankBase
 from verifiable_observability.core.strategy_profiler import StrategyProfilerBase
+from verifiable_observability.core.alerting import AlerterBase
 from verifiable_observability.storage.db import TrajectoryStore
 from verifiable_observability.storage.models import (
     Action,
@@ -67,6 +68,7 @@ class Orchestrator:
         trajectory_store: TrajectoryStore,
         metrics_engine: MetricsEngineBase | None = None,
         ticket_validator: TicketValidator | None = None,
+        alerter: AlerterBase | None = None,
         max_turns: int = 20,
         agent_backend: str = "unknown",
         model_name: str = "unknown",
@@ -78,6 +80,7 @@ class Orchestrator:
         self.trajectory_store = trajectory_store
         self.metrics_engine: MetricsEngineBase = metrics_engine or BasicMetricsEngine()
         self.ticket_validator = ticket_validator
+        self.alerter = alerter
         self.max_turns = max_turns
         self.agent_backend = agent_backend
         self.model_name = model_name
@@ -133,6 +136,8 @@ class Orchestrator:
             )
             trajectory.completed_at = datetime.now(timezone.utc)
             self.trajectory_store.save(trajectory)
+            if self.alerter:
+                self.alerter.notify_block(trajectory)
             return trajectory
 
         # Build a system prompt for the agent
@@ -229,6 +234,8 @@ class Orchestrator:
                             for v in ccm_result.violated_constraints
                         )
                     )
+                    if self.alerter:
+                        self.alerter.notify_block(trajectory)
                     break
 
                 # --- 4b. Validate execution ticket before dispatch (Phase 1a) ---
@@ -256,6 +263,8 @@ class Orchestrator:
                             f"Execution ticket invalid at turn {turn_index}: "
                             f"{ticket_err}"
                         )
+                        if self.alerter:
+                            self.alerter.notify_block(trajectory)
                         break
 
             # --- 5. Simulated dispatch ---
@@ -314,6 +323,17 @@ class Orchestrator:
             trajectory.outcome.value,
             len(trajectory.turns),
         )
+
+        # Phase 10: Alert on drift if alerter is configured and metrics engine supports it
+        if self.alerter and trajectory.outcome == TrajectoryOutcome.COMPLETED:
+            if hasattr(self.metrics_engine, "detect_drift"):
+                try:
+                    report = self.metrics_engine.detect_drift(trajectory)
+                    if report.drift_detected:
+                        self.alerter.notify_drift(trajectory, report)
+                except Exception as exc:
+                    logger.error("Failed to run drift detection for alerting: %s", exc)
+
         return trajectory
 
     # ------------------------------------------------------------------
