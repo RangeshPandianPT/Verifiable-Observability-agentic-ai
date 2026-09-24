@@ -381,6 +381,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         .badge-blocked   {{ background: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5; border-radius: 9999px; padding: 4px 12px; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.02em; display: inline-block; }}
         .badge-truncated {{ background: #ffedd5; color: #c2410c; border: 1px solid #fed7aa; border-radius: 9999px; padding: 4px 12px; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.02em; display: inline-block; }}
         .badge-failed    {{ background: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5; border-radius: 9999px; padding: 4px 12px; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.02em; display: inline-block; }}
+        .badge-flagged   {{ background: #fef08a; color: #a16207; border: 1px solid #fde047; border-radius: 9999px; padding: 4px 12px; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.02em; display: inline-block; }}
         .badge-default   {{ background: #f1f5f9; color: #64748b; border: 1px solid #e2e8f0; border-radius: 9999px; padding: 4px 12px; font-size: 0.72rem; font-weight: 600; display: inline-block; }}
 
         /* Metrics & Drift */
@@ -476,34 +477,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 </div>
                 <div class="stat-value" style="color: #d97706">{drifted}</div>
             </div>
-            <!-- Phase 6 Stats -->
-            <div class="stat-card">
-                <div class="stat-header">
-                    <span class="stat-label">Avg CCM Latency</span>
-                    <span class="stat-icon">⏱️</span>
-                </div>
-                <div class="stat-value" style="color: #8b5cf6">1.4 ms</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-header">
-                    <span class="stat-label">False-Block Rate</span>
-                    <span class="stat-icon">📉</span>
-                </div>
-                <div class="stat-value" style="color: #0ea5e9">0.2%</div>
-            </div>
-        </div>
-
-        <!-- Phase 5: Human Feedback Queue -->
-        <div class="card" style="margin-bottom: 24px;">
-            <div class="card-header">
-                <div class="card-header-title">
-                    <h2>Pending Human Feedback (FLAGs)</h2>
-                    <span class="count-pill">{pending_flags_count} Pending</span>
-                </div>
-            </div>
-            <div class="table-responsive">
-                {feedback_table_or_empty}
-            </div>
         </div>
 
         <div class="card">
@@ -536,6 +509,7 @@ OUTCOME_BADGE = {
     "blocked": "badge-blocked",
     "truncated": "badge-truncated",
     "failed": "badge-failed",
+    "flagged": "badge-flagged",
 }
 
 TREND_CLASS = {
@@ -551,30 +525,18 @@ def index(request: Request):
     engine = create_db_engine(_DB_PATH)
     traj_store = TrajectoryStore(engine)
     metrics_engine = BasicMetricsEngine()
-    
-    # Phase 5: Feedback Manager
-    from verifiable_observability.core.feedback import FeedbackManager
-    feedback_manager = FeedbackManager(engine)
-    pending_flags = feedback_manager.get_pending_flags()
-    
-    if not pending_flags:
-        feedback_html = '<div class="empty-state"><div class="icon">✅</div><p>No pending flagged actions to review.</p></div>'
-    else:
-        fb_tbody = "".join([
-            f"<tr><td><span class='mono'>{f['action_id']}</span></td><td>{f['details']}</td><td>{f['checked_at']}</td>"
-            f"<td><button style='background:#10b981;color:white;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;margin-right:4px;'>Approve</button>"
-            f"<button style='background:#ef4444;color:white;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;'>Block</button></td></tr>"
-            for f in pending_flags
-        ])
-        feedback_html = f"<table><thead><tr><th>Action ID</th><th>Details</th><th>Checked At</th><th>Action</th></tr></thead><tbody>{fb_tbody}</tbody></table>"
 
     summaries = traj_store.list_trajectories(limit=100)
 
     trajectories = []
     for s in summaries:
-        t = traj_store.load(s["trajectory_id"])
-        if t is not None:
-            trajectories.append(t)
+        try:
+            t = traj_store.load(s["trajectory_id"])
+            if t is not None:
+                trajectories.append(t)
+        except ValueError:
+            # Skip crypto-shredded trajectories instead of crashing
+            continue
 
     if not trajectories:
         return HTML_TEMPLATE.format(
@@ -646,8 +608,6 @@ def index(request: Request):
         blocked=blocked,
         drifted=drifted,
         table_or_empty=table_html,
-        pending_flags_count=len(pending_flags),
-        feedback_table_or_empty=feedback_html,
     )
 
 @app.post("/run_task", response_class=RedirectResponse)
