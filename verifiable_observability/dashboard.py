@@ -538,22 +538,207 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         .timeline-title { font-size: 13px; font-weight: 600; margin-bottom: 6px; color: var(--text-primary); }
         .timeline-desc { font-size: 12px; color: var(--text-secondary); line-height: 1.5; font-family: 'JetBrains Mono', monospace; white-space: pre-wrap; }
 
-        /* Loading Overlay */
-        .loading-overlay {
-            display: none; position: fixed; inset: 0; background: rgba(8, 13, 25, 0.85);
-            backdrop-filter: blur(4px); z-index: 9999; justify-content: center; align-items: center; flex-direction: column; gap: 16px;
+        /* Cinematic Processing Overlay */
+        .proc-overlay {
+            display: none; position: fixed; inset: 0; background: rgba(5, 10, 20, 0.78);
+            backdrop-filter: blur(10px); z-index: 9999; justify-content: center; align-items: center;
+            color: #E8EDF7; font-family: 'Inter', sans-serif;
+            opacity: 0; transition: opacity 0.4s ease;
         }
-        .loading-overlay.active { display: flex; }
-        .spinner { width: 32px; height: 32px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
-        @keyframes spin { to { transform: rotate(360deg); } }
+        .proc-overlay.active { display: flex; }
+        .proc-bg-glow {
+            position: absolute; width: 500px; height: 500px;
+            background: radial-gradient(circle, rgba(139,92,246,0.15) 0%, rgba(5,10,20,0) 60%);
+            border-radius: 50%; pointer-events: none;
+            animation: pulseGlow 4s ease-in-out infinite alternate;
+        }
+        @keyframes pulseGlow { 0% { transform: scale(0.8); opacity: 0.5; } 100% { transform: scale(1.1); opacity: 1; } }
+        
+        .proc-content {
+            position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; width: 100%; max-width: 500px;
+        }
+
+        .proc-core-container {
+            position: relative; width: 140px; height: 140px; display: flex; justify-content: center; align-items: center; margin-bottom: 32px;
+        }
+        .proc-ring {
+            position: absolute; inset: 0; border-radius: 50%; border: 1px solid transparent; transition: animation-duration 1s ease;
+        }
+        .proc-ring-1 {
+            border-top-color: rgba(139, 92, 246, 0.6); border-bottom-color: rgba(96, 165, 250, 0.4);
+            animation: spinRing 4s linear infinite;
+        }
+        .proc-ring-2 {
+            inset: 12px; border-left-color: rgba(139, 92, 246, 0.4); border-right-color: rgba(96, 165, 250, 0.6);
+            animation: spinRingRev 6s linear infinite;
+        }
+        .proc-ring-3 {
+            inset: 24px; border: 1px dashed rgba(139, 92, 246, 0.3);
+            animation: spinRing 12s linear infinite;
+        }
+        @keyframes spinRing { 100% { transform: rotate(360deg); } }
+        @keyframes spinRingRev { 100% { transform: rotate(-360deg); } }
+        
+        .proc-center {
+            position: relative; width: 64px; height: 64px; background: rgba(13, 20, 36, 0.8);
+            border: 1px solid rgba(139, 92, 246, 0.5); border-radius: 50%;
+            display: flex; justify-content: center; align-items: center;
+            box-shadow: 0 0 20px rgba(139, 92, 246, 0.3);
+            transition: all 0.5s ease;
+        }
+        .proc-icon { color: #8B5CF6; transition: color 0.5s ease; }
+
+        .proc-particles { position: absolute; inset: -40px; pointer-events: none; }
+        .proc-particle {
+            position: absolute; width: 3px; height: 3px; background: #60A5FA; border-radius: 50%;
+            box-shadow: 0 0 6px #60A5FA; opacity: 0;
+        }
+        @keyframes particleFade {
+            0% { opacity: 0; transform: scale(0.5); }
+            50% { opacity: 0.6; transform: scale(1.2); }
+            100% { opacity: 0; transform: scale(0.5); }
+        }
+
+        .proc-status-container { height: 24px; margin-bottom: 24px; overflow: hidden; position: relative; width: 100%; text-align: center; }
+        .proc-status-text {
+            font-size: 15px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase;
+            color: #E8EDF7; position: absolute; width: 100%; transition: opacity 0.3s ease, color 0.5s ease;
+        }
+
+        .proc-metadata {
+            display: flex; gap: 32px; margin-bottom: 32px; font-family: 'JetBrains Mono', monospace;
+            font-size: 11px; padding: 12px 24px; background: rgba(13, 20, 36, 0.6);
+            border: 1px solid rgba(32, 43, 64, 0.8); border-radius: 6px;
+        }
+        .proc-meta-row { display: flex; flex-direction: column; gap: 4px; align-items: center; }
+        .proc-meta-label { color: #8491A7; font-size: 9px; letter-spacing: 0.1em; }
+        .proc-meta-val { color: #E8EDF7; }
+
+        .proc-signal {
+            display: flex; gap: 4px; height: 24px; align-items: flex-end; margin-bottom: 32px;
+        }
+        .proc-bar {
+            width: 4px; background: rgba(139, 92, 246, 0.5); border-radius: 2px;
+            animation: signalPulse 1s ease-in-out infinite alternate;
+            height: var(--h);
+        }
+        .proc-bar:nth-child(even) { animation-delay: 0.2s; background: rgba(96, 165, 250, 0.5); }
+        .proc-bar:nth-child(3n) { animation-delay: 0.4s; }
+        @keyframes signalPulse { 0% { transform: scaleY(0.4); } 100% { transform: scaleY(1); } }
+
+        .proc-trajectory {
+            display: flex; align-items: center; justify-content: center; width: 100%; margin-bottom: 32px;
+        }
+        .proc-node {
+            display: flex; flex-direction: column; align-items: center; gap: 8px; width: 60px;
+        }
+        .proc-node-icon {
+            font-size: 12px; font-weight: 800; color: #8491A7; width: 24px; height: 24px; display: flex; justify-content: center; align-items: center;
+            border-radius: 50%; transition: all 0.3s ease;
+        }
+        .proc-node-lbl { font-size: 9px; font-weight: 600; color: #8491A7; letter-spacing: 0.05em; transition: color 0.3s ease; }
+        .proc-line { flex-grow: 1; height: 1px; background: #202B40; margin: 0 -10px; max-width: 30px; margin-top: -12px; }
+        
+        .proc-node.active .proc-node-icon {
+            color: #E8EDF7; background: rgba(139, 92, 246, 0.2); box-shadow: 0 0 10px rgba(139, 92, 246, 0.4); border: 1px solid rgba(139, 92, 246, 0.6);
+        }
+        .proc-node.active .proc-node-lbl { color: #8B5CF6; }
+        .proc-node.done .proc-node-icon { color: #34D399; }
+        .proc-node.done .proc-node-lbl { color: #E8EDF7; }
+
+        .proc-progress { width: 100%; max-width: 300px; }
+        .proc-progress-track { height: 2px; background: rgba(32, 43, 64, 0.5); position: relative; overflow: hidden; border-radius: 2px; }
+        .proc-progress-thumb {
+            position: absolute; top: 0; bottom: 0; width: 30%; background: linear-gradient(90deg, transparent, #8B5CF6, transparent);
+            animation: progressShimmer 2s ease-in-out infinite;
+        }
+        @keyframes progressShimmer { 0% { left: -30%; } 100% { left: 100%; } }
+
+        .proc-error-reason {
+            display: none; margin-top: 24px; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #FB7185;
+            background: rgba(251, 113, 133, 0.1); border: 1px solid rgba(251, 113, 133, 0.2); padding: 12px; border-radius: 6px; text-align: center; max-width: 400px;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .proc-bg-glow, .proc-ring, .proc-bar, .proc-progress-thumb, .proc-particle { animation: none !important; display: none !important; }
+        }
         
         .empty-state { text-align: center; padding: 40px; color: var(--text-secondary); }
     </style>
 </head>
 <body>
-    <div id="loadingOverlay" class="loading-overlay">
-        <div class="spinner"></div>
-        <div style="font-size:14px; font-weight:600; letter-spacing:0.02em;">Executing Agent Trajectory...</div>
+    <div id="processingOverlay" class="proc-overlay">
+        <div class="proc-bg-glow"></div>
+        <div class="proc-content">
+            <div class="proc-core-container">
+                <div class="proc-ring proc-ring-1"></div>
+                <div class="proc-ring proc-ring-2"></div>
+                <div class="proc-ring proc-ring-3"></div>
+                <div class="proc-particles" id="proc-particles"></div>
+                <div class="proc-center" id="proc-center">
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="proc-icon" id="proc-icon-main"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                </div>
+            </div>
+            
+            <div class="proc-status-container">
+                <div class="proc-status-text" id="proc-status-text">Initializing agent runtime...</div>
+            </div>
+            
+            <div class="proc-signal">
+                <div class="proc-bar" style="--h: 40%"></div>
+                <div class="proc-bar" style="--h: 80%"></div>
+                <div class="proc-bar" style="--h: 50%"></div>
+                <div class="proc-bar" style="--h: 100%"></div>
+                <div class="proc-bar" style="--h: 60%"></div>
+                <div class="proc-bar" style="--h: 90%"></div>
+                <div class="proc-bar" style="--h: 30%"></div>
+                <div class="proc-bar" style="--h: 70%"></div>
+                <div class="proc-bar" style="--h: 50%"></div>
+                <div class="proc-bar" style="--h: 80%"></div>
+                <div class="proc-bar" style="--h: 40%"></div>
+            </div>
+
+            <div class="proc-trajectory">
+                <div class="proc-node active" id="node-prompt">
+                    <div class="proc-node-icon">○</div>
+                    <div class="proc-node-lbl">PROMPT</div>
+                </div>
+                <div class="proc-line"></div>
+                <div class="proc-node" id="node-plan">
+                    <div class="proc-node-icon">○</div>
+                    <div class="proc-node-lbl">PLAN</div>
+                </div>
+                <div class="proc-line"></div>
+                <div class="proc-node" id="node-execute">
+                    <div class="proc-node-icon">○</div>
+                    <div class="proc-node-lbl">EXECUTE</div>
+                </div>
+                <div class="proc-line"></div>
+                <div class="proc-node" id="node-observe">
+                    <div class="proc-node-icon">○</div>
+                    <div class="proc-node-lbl">OBSERVE</div>
+                </div>
+                <div class="proc-line"></div>
+                <div class="proc-node" id="node-verify">
+                    <div class="proc-node-icon">○</div>
+                    <div class="proc-node-lbl">VERIFY</div>
+                </div>
+            </div>
+            
+            <div class="proc-metadata">
+                <div class="proc-meta-row"><span class="proc-meta-label">MODEL</span><span class="proc-meta-val">llama3.2:3b</span></div>
+                <div class="proc-meta-row"><span class="proc-meta-label">BACKEND</span><span class="proc-meta-val">Ollama</span></div>
+                <div class="proc-meta-row"><span class="proc-meta-label">REGIME</span><span class="proc-meta-val" id="proc-meta-regime">Finance</span></div>
+            </div>
+
+            <div class="proc-progress">
+                <div class="proc-progress-track">
+                    <div class="proc-progress-thumb" id="proc-progress-thumb"></div>
+                </div>
+            </div>
+            
+            <div class="proc-error-reason" id="proc-error-reason"></div>
+        </div>
     </div>
 
     <!-- Sidebar -->
@@ -624,7 +809,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                         TEST AGENT
                         <span class="subtitle">Execute a controlled trajectory</span>
                     </div>
-                    <form method="POST" action="/run_task" onsubmit="document.getElementById('loadingOverlay').classList.add('active')">
+                    <form method="POST" action="/run_task" onsubmit="handleRunTask(event)">
                         <input type="text" name="prompt" class="console-input" placeholder="Transfer $500 from ACC-001 to ACC-002" required />
                         <div class="console-controls">
                             <select name="domain" class="console-select">
@@ -1020,6 +1205,191 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         }
 
         document.addEventListener('DOMContentLoaded', renderDashboard);
+        // Cinematic Processing Overlay Logic
+        let procStatusInterval;
+        let procNodeInterval;
+        const statusMessages = [
+            "Initializing agent runtime...",
+            "Building trajectory...",
+            "Executing agent...",
+            "Observing agent behavior...",
+            "Evaluating tool interactions...",
+            "Checking behavioral constraints...",
+            "Analyzing trajectory...",
+            "Running verification checks..."
+        ];
+
+        function resetProcessingState() {
+            document.getElementById('proc-status-text').innerText = statusMessages[0];
+            document.getElementById('proc-status-text').style.opacity = 1;
+            document.getElementById('proc-status-text').style.color = '#E8EDF7';
+            document.getElementById('proc-center').style.borderColor = 'rgba(139, 92, 246, 0.5)';
+            document.getElementById('proc-icon-main').style.color = '#8B5CF6';
+            document.getElementById('proc-icon-main').innerHTML = '<path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>';
+            document.getElementById('proc-error-reason').style.display = 'none';
+            document.querySelectorAll('.proc-ring').forEach(el => { el.style.animationPlayState = 'running'; el.style.animationDuration = el.classList.contains('proc-ring-3') ? '12s' : (el.classList.contains('proc-ring-2') ? '6s' : '4s'); });
+            document.getElementById('proc-progress-thumb').style.animationPlayState = 'running';
+            
+            const nodes = ['prompt', 'plan', 'execute', 'observe', 'verify'];
+            nodes.forEach(n => {
+                const el = document.getElementById('node-' + n);
+                el.className = 'proc-node';
+                el.querySelector('.proc-node-icon').innerText = '○';
+            });
+            document.getElementById('node-prompt').classList.add('active');
+        }
+
+        function startSimulatedProgress() {
+            let msgIdx = 0;
+            procStatusInterval = setInterval(() => {
+                msgIdx = (msgIdx + 1) % statusMessages.length;
+                const el = document.getElementById('proc-status-text');
+                el.style.opacity = 0;
+                setTimeout(() => {
+                    el.innerText = statusMessages[msgIdx];
+                    el.style.opacity = 1;
+                }, 300);
+            }, 2500);
+
+            const nodes = ['prompt', 'plan', 'execute', 'observe', 'verify'];
+            let nodeIdx = 0;
+            procNodeInterval = setInterval(() => {
+                if (nodeIdx < nodes.length - 1) {
+                    const current = document.getElementById('node-' + nodes[nodeIdx]);
+                    current.classList.remove('active');
+                    current.classList.add('done');
+                    current.querySelector('.proc-node-icon').innerText = '✓';
+                    nodeIdx++;
+                    document.getElementById('node-' + nodes[nodeIdx]).classList.add('active');
+                }
+            }, 3000);
+            
+            // Generate particles
+            if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+                const particlesContainer = document.getElementById('proc-particles');
+                particlesContainer.innerHTML = '';
+                for(let i = 0; i < 14; i++) {
+                    const p = document.createElement('div');
+                    p.className = 'proc-particle';
+                    const angle = Math.random() * Math.PI * 2;
+                    const radius = 60 + Math.random() * 25;
+                    p.style.left = `calc(50% + ${Math.cos(angle)*radius}px)`;
+                    p.style.top = `calc(50% + ${Math.sin(angle)*radius}px)`;
+                    p.style.animation = `particleFade ${2 + Math.random()*2}s ease-in-out infinite`;
+                    p.style.animationDelay = `${Math.random()*2}s`;
+                    particlesContainer.appendChild(p);
+                }
+            }
+        }
+
+        function finishProcessing(outcome, reason, callback) {
+            clearInterval(procStatusInterval);
+            clearInterval(procNodeInterval);
+            
+            const nodes = ['prompt', 'plan', 'execute', 'observe', 'verify'];
+            nodes.forEach(n => {
+                const el = document.getElementById('node-' + n);
+                el.classList.remove('active');
+                el.classList.add('done');
+                el.querySelector('.proc-node-icon').innerText = '✓';
+            });
+
+            document.querySelectorAll('.proc-ring').forEach(el => el.style.animationDuration = '20s'); // slow down
+            document.getElementById('proc-progress-thumb').style.animationPlayState = 'paused';
+
+            const center = document.getElementById('proc-center');
+            const icon = document.getElementById('proc-icon-main');
+            const status = document.getElementById('proc-status-text');
+            
+            status.style.opacity = 0;
+            
+            setTimeout(() => {
+                status.style.opacity = 1;
+                if (outcome === 'completed') {
+                    center.style.borderColor = '#34D399';
+                    icon.style.color = '#34D399';
+                    icon.innerHTML = '<polyline points="20 6 9 17 4 12"></polyline>';
+                    status.style.color = '#34D399';
+                    status.innerText = '✓ Trajectory Verified';
+                } else if (outcome === 'blocked' || outcome === 'flagged') {
+                    center.style.borderColor = '#FBBF24';
+                    icon.style.color = '#FBBF24';
+                    icon.innerHTML = '<line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>';
+                    status.style.color = '#FBBF24';
+                    status.innerText = '✕ Trajectory Blocked';
+                    if (reason) {
+                        const rEl = document.getElementById('proc-error-reason');
+                        rEl.innerText = reason;
+                        rEl.style.display = 'block';
+                    }
+                } else {
+                    center.style.borderColor = '#FB7185';
+                    icon.style.color = '#FB7185';
+                    icon.innerHTML = '<circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line>';
+                    status.style.color = '#FB7185';
+                    status.innerText = '! Execution Failed';
+                    if (reason) {
+                        const rEl = document.getElementById('proc-error-reason');
+                        rEl.innerText = reason;
+                        rEl.style.display = 'block';
+                    }
+                }
+                
+                setTimeout(() => {
+                    const overlay = document.getElementById('processingOverlay');
+                    overlay.style.opacity = 0;
+                    setTimeout(() => {
+                        overlay.classList.remove('active');
+                        callback();
+                    }, 400);
+                }, 1000);
+            }, 300);
+        }
+
+        async function handleRunTask(event) {
+            event.preventDefault();
+            const form = event.target;
+            const formData = new FormData(form);
+            
+            const domainMap = { 'finance': 'Finance', 'healthcare': 'Healthcare', 'code_execution': 'Code Exec' };
+            document.getElementById('proc-meta-regime').innerText = domainMap[formData.get('domain')] || formData.get('domain');
+            
+            resetProcessingState();
+            const overlay = document.getElementById('processingOverlay');
+            overlay.classList.add('active');
+            
+            // Force reflow for transitions
+            void overlay.offsetWidth;
+            overlay.style.opacity = 1;
+            
+            startSimulatedProgress();
+            
+            try {
+                const response = await fetch(form.action, { method: form.method, body: formData, redirect: 'follow' });
+                const htmlText = await response.text();
+                
+                const match = htmlText.match(/const rawData = (\{.*?\});/s);
+                let outcome = 'completed';
+                let reason = '';
+                if (match && match[1]) {
+                    const newData = JSON.parse(match[1]);
+                    if (newData.rows && newData.rows.length > 0) {
+                        outcome = newData.rows[0].outcome;
+                        reason = newData.rows[0].failure_reason;
+                    }
+                }
+                
+                finishProcessing(outcome, reason, () => {
+                    document.open();
+                    document.write(htmlText);
+                    document.close();
+                });
+            } catch (err) {
+                finishProcessing('failed', 'Network Error: ' + err.message, () => {
+                    location.reload();
+                });
+            }
+        }
     </script>
 </body>
 </html>
