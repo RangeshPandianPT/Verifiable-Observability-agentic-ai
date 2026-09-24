@@ -971,8 +971,13 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         function renderDashboard() {
             if (trajectories.length === 0) {
                 document.getElementById('empty-state').style.display = 'block';
+                document.getElementById('traj-tbody').innerHTML = '';
+                document.getElementById('kpi-cards').innerHTML = '';
+                document.getElementById('outcome-total-lbl').innerText = '0';
                 return;
             }
+            
+            document.getElementById('empty-state').style.display = 'none';
             
             document.getElementById('last-updated').innerText = 'Updated ' + new Date().toLocaleTimeString();
 
@@ -1368,7 +1373,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 const response = await fetch(form.action, { method: form.method, body: formData, redirect: 'follow' });
                 const htmlText = await response.text();
                 
-                const match = htmlText.match(/const rawData = (\{.*?\});/s);
+                const match = htmlText.match(/const rawData = ({.*?});/s);
                 let outcome = 'completed';
                 let reason = '';
                 if (match && match[1]) {
@@ -1376,13 +1381,19 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     if (newData.rows && newData.rows.length > 0) {
                         outcome = newData.rows[0].outcome;
                         reason = newData.rows[0].failure_reason;
+                        
+                        // Update global state with the new data
+                        window.trajectories = newData.rows;
+                        window.detailsMap = newData.details;
                     }
                 }
                 
                 finishProcessing(outcome, reason, () => {
-                    document.open();
-                    document.write(htmlText);
-                    document.close();
+                    if (typeof renderDashboard === 'function') {
+                        renderDashboard();
+                    } else {
+                        location.reload();
+                    }
                 });
             } catch (err) {
                 finishProcessing('failed', 'Network Error: ' + err.message, () => {
