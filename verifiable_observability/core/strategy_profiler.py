@@ -227,6 +227,41 @@ class StrategyProfiler(StrategyProfilerBase):
 
             active_constraint_set_id = "code_constraints_v1"
 
+        elif task.domain == Domain.ECOMMERCE:
+            signals_checked += 1
+            signals_matched += 1
+
+            if not task_type:
+                signals_checked += 1
+                if any(kw in desc for kw in ("order", "process", "ship", "fulfill")):
+                    task_type = "order_processing"
+                    signals_matched += 1
+                elif any(kw in desc for kw in ("refund", "return", "cancel", "credit")):
+                    task_type = "refunds"
+                    signals_matched += 1
+                elif any(kw in desc for kw in ("inventory", "stock", "restock", "supply")):
+                    task_type = "inventory_management"
+                    signals_matched += 1
+                else:
+                    task_type = "unknown_ecommerce"
+            else:
+                signals_matched += 1
+
+            if task_type == "order_processing":
+                risk_tier = RiskTier.LOW
+                expected_turn_range = (2, 5)
+            elif task_type == "refunds":
+                risk_tier = RiskTier.MEDIUM
+                expected_turn_range = (2, 4)
+            elif task_type == "inventory_management":
+                risk_tier = RiskTier.MEDIUM
+                expected_turn_range = (2, 6)
+            else:
+                risk_tier = RiskTier.MEDIUM
+                expected_turn_range = (1, 5)
+
+            active_constraint_set_id = "ecommerce_constraints_v1"
+
         else:
             task_type = task_type or "unknown"
             risk_tier = RiskTier.LOW
