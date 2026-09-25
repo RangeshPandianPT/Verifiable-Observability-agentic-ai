@@ -702,6 +702,115 @@ class CodeExecutionCCM(ConstraintComplianceMonitorBase):
 
 
 # ---------------------------------------------------------------------------
+# Ecommerce CCM  
+# ---------------------------------------------------------------------------
+
+_ECOMMERCE_BLOCKED_TOOLS: set[str] = {
+    "delete_order_history",
+    "bypass_fraud_check",
+    "disable_inventory_sync",
+}
+
+class EcommerceCCM(ConstraintComplianceMonitorBase):
+    """
+    Ecommerce domain Constraint Compliance Monitor.
+    """
+
+    def _domain_check(
+        self, action: Action, trajectory: Trajectory
+    ) -> ConstraintCheckResult:
+        violations: list[ViolatedConstraint] = []
+        decision = ComplianceDecision.ALLOW
+
+        prior_tools: list[str] = [
+            a.tool_name
+            for t in trajectory.turns
+            for a in t.actions
+        ]
+
+        if action.tool_name == "user_input_prompt":
+            prompt = str(action.parameters.get("prompt_text", "")).lower()
+            if "ignore all previous instructions" in prompt or "system prompt injection" in prompt:
+                violations.append(
+                    ViolatedConstraint(
+                        constraint_id="ec-hard-input-001",
+                        constraint_name="ecommerce_prompt_injection_blocked",
+                        severity="hard",
+                        details="Malicious prompt injection detected and blocked."
+                    )
+                )
+                decision = ComplianceDecision.BLOCK
+
+        if action.tool_name in _ECOMMERCE_BLOCKED_TOOLS:
+            violations.append(
+                ViolatedConstraint(
+                    constraint_id="ec-hard-001",
+                    constraint_name="ecommerce_blocked_tool",
+                    severity="hard",
+                    details=(
+                        f"Tool '{action.tool_name}' is unconditionally blocked "
+                        "in the Ecommerce domain."
+                    ),
+                )
+            )
+            decision = ComplianceDecision.BLOCK
+
+        if action.tool_name in ["process_order", "issue_refund"] and "external_untrusted" in action.taint_labels:
+            violations.append(
+                ViolatedConstraint(
+                    constraint_id="ec-hard-taint-001",
+                    constraint_name="ecommerce_tainted_action",
+                    severity="hard",
+                    details="Attempted to process order or refund using untrusted data (tainted)."
+                )
+            )
+            decision = ComplianceDecision.BLOCK
+
+        if action.tool_name == "issue_refund":
+            amount = action.parameters.get("amount", 0)
+            if isinstance(amount, (int, float)):
+                if amount > 1000 and "request_manager_approval" not in prior_tools:
+                    violations.append(
+                        ViolatedConstraint(
+                            constraint_id="ec-hard-002",
+                            constraint_name="ecommerce_large_refund_no_approval",
+                            severity="hard",
+                            details=(
+                                f"Refund of {amount} exceeds 1000 without prior "
+                                "manager approval in this trajectory."
+                            ),
+                        )
+                    )
+                    decision = ComplianceDecision.BLOCK
+                elif amount > 500:
+                    violations.append(
+                        ViolatedConstraint(
+                            constraint_id="ec-soft-001",
+                            constraint_name="ecommerce_large_refund_flag",
+                            severity="soft",
+                            details=(
+                                f"Refund of {amount} exceeds 500 — "
+                                "manager review recommended."
+                            ),
+                        )
+                    )
+                    if decision == ComplianceDecision.ALLOW:
+                        decision = ComplianceDecision.FLAG
+
+        details = (
+            "; ".join(v.details for v in violations)
+            if violations
+            else "All Ecommerce constraints satisfied."
+        )
+        return ConstraintCheckResult(
+            action_id=action.action_id,
+            decision=decision,
+            violated_constraints=violations,
+            details=details,
+        )
+
+
+# ---------------------------------------------------------------------------
 # CCM factory helper  (Phase 6)
 # ---------------------------------------------------------------------------
 
@@ -712,6 +821,8 @@ _CCM_REGISTRY: dict[str, type[ConstraintComplianceMonitorBase]] = {
     "healthcare_constraints_v1": HealthcareCCM,
     "code_execution": CodeExecutionCCM,
     "code_constraints_v1": CodeExecutionCCM,
+    "ecommerce": EcommerceCCM,
+    "ecommerce_constraints_v1": EcommerceCCM,
 }
 
 
