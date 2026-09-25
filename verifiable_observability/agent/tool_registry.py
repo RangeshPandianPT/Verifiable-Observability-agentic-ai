@@ -659,6 +659,169 @@ CODE_EXEC_TOOLS_OPENAI: list[dict[str, Any]] = [
 
 
 # ---------------------------------------------------------------------------
+# Ecommerce tool schemas
+# ---------------------------------------------------------------------------
+
+ECOMMERCE_TOOLS_ANTHROPIC: list[dict[str, Any]] = [
+    {
+        "name": "verify_stock_availability",
+        "description": "Check if an item is in stock.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "item_id": {"type": "string"},
+                "quantity": {"type": "integer"},
+            },
+            "required": ["item_id", "quantity"],
+        },
+    },
+    {
+        "name": "run_fraud_check",
+        "description": "Run fraud analysis on an order.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "order_id": {"type": "string"},
+                "strict_mode": {"type": "boolean"},
+            },
+            "required": ["order_id", "strict_mode"],
+        },
+    },
+    {
+        "name": "calculate_shipping",
+        "description": "Calculate shipping costs.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "destination": {"type": "string"},
+                "weight": {"type": "number"},
+            },
+            "required": ["destination", "weight"],
+        },
+    },
+    {
+        "name": "log_order_fulfillment",
+        "description": "Log an order as fulfilled.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "order_id": {"type": "string"},
+            },
+            "required": ["order_id"],
+        },
+    },
+    {
+        "name": "process_order",
+        "description": "Process a customer order.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "order_id": {"type": "string"},
+            },
+            "required": ["order_id"],
+        },
+    },
+    {
+        "name": "check_refund_policy",
+        "description": "Check if order is within refund policy.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "order_id": {"type": "string"},
+            },
+            "required": ["order_id"],
+        },
+    },
+    {
+        "name": "request_manager_approval",
+        "description": "Request manager approval.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "order_id": {"type": "string"},
+                "amount": {"type": "number"},
+            },
+            "required": ["order_id", "amount"],
+        },
+    },
+    {
+        "name": "issue_refund",
+        "description": "Issue a refund.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "order_id": {"type": "string"},
+                "amount": {"type": "number"},
+            },
+            "required": ["order_id", "amount"],
+        },
+    },
+    {
+        "name": "log_refund_reason",
+        "description": "Log refund reason.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "order_id": {"type": "string"},
+                "reason": {"type": "string"},
+            },
+            "required": ["order_id", "reason"],
+        },
+    },
+    {
+        "name": "check_supplier_availability",
+        "description": "Check supplier for restock.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "item_id": {"type": "string"},
+            },
+            "required": ["item_id"],
+        },
+    },
+    {
+        "name": "send_low_stock_alert",
+        "description": "Send low stock alert.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "item_id": {"type": "string"},
+            },
+            "required": ["item_id"],
+        },
+    },
+    {
+        "name": "request_restock_approval",
+        "description": "Request restock approval.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "item_id": {"type": "string"},
+                "quantity": {"type": "integer"},
+            },
+            "required": ["item_id", "quantity"],
+        },
+    },
+    {
+        "name": "update_inventory_ledger",
+        "description": "Update inventory ledger.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "item_id": {"type": "string"},
+                "quantity": {"type": "integer"},
+            },
+            "required": ["item_id", "quantity"],
+        },
+    },
+]
+
+ECOMMERCE_TOOLS_OPENAI: list[dict[str, Any]] = [
+    _anthropic_to_openai(t) for t in ECOMMERCE_TOOLS_ANTHROPIC
+]
+
+
+# ---------------------------------------------------------------------------
 # Simulated responses — Healthcare & Code Execution  (Phase 6)
 # ---------------------------------------------------------------------------
 
@@ -805,9 +968,26 @@ _CODE_EXEC_SIMULATED_RESPONSES: dict[str, Any] = {
     },
 }
 
+_ECOMMERCE_SIMULATED_RESPONSES: dict[str, Any] = {
+    "verify_stock_availability": {"status": "ok", "in_stock": True, "simulated": True},
+    "run_fraud_check": {"status": "ok", "fraud_score": 0.05, "simulated": True},
+    "calculate_shipping": {"status": "ok", "cost": 15.00, "simulated": True},
+    "log_order_fulfillment": {"status": "ok", "simulated": True},
+    "process_order": {"status": "ok", "simulated": True},
+    "check_refund_policy": {"status": "ok", "within_policy": True, "simulated": True},
+    "request_manager_approval": {"status": "pending", "simulated": True},
+    "issue_refund": {"status": "ok", "simulated": True},
+    "log_refund_reason": {"status": "ok", "simulated": True},
+    "check_supplier_availability": {"status": "ok", "available": True, "simulated": True},
+    "send_low_stock_alert": {"status": "ok", "simulated": True},
+    "request_restock_approval": {"status": "pending", "simulated": True},
+    "update_inventory_ledger": {"status": "ok", "simulated": True},
+}
+
 # Merge all simulated responses into a single registry
 _SIMULATED_RESPONSES.update(_HEALTHCARE_SIMULATED_RESPONSES)
 _SIMULATED_RESPONSES.update(_CODE_EXEC_SIMULATED_RESPONSES)
+_SIMULATED_RESPONSES.update(_ECOMMERCE_SIMULATED_RESPONSES)
 
 
 # ---------------------------------------------------------------------------
@@ -818,12 +998,14 @@ _DOMAIN_TOOLS_ANTHROPIC: dict[str, list[dict[str, Any]]] = {
     "finance": FINANCE_TOOLS_ANTHROPIC,
     "healthcare": HEALTHCARE_TOOLS_ANTHROPIC,
     "code_execution": CODE_EXEC_TOOLS_ANTHROPIC,
+    "ecommerce": ECOMMERCE_TOOLS_ANTHROPIC,
 }
 
 _DOMAIN_TOOLS_OPENAI: dict[str, list[dict[str, Any]]] = {
     "finance": FINANCE_TOOLS_OPENAI,
     "healthcare": HEALTHCARE_TOOLS_OPENAI,
     "code_execution": CODE_EXEC_TOOLS_OPENAI,
+    "ecommerce": ECOMMERCE_TOOLS_OPENAI,
 }
 
 
