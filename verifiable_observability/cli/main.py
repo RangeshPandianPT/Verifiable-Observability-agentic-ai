@@ -44,6 +44,9 @@ from verifiable_observability.simulation.domains.healthcare.seed_rules import (
 from verifiable_observability.simulation.domains.code_execution.seed_rules import (
     load_seed_rules_into_bank as load_code_exec_rules,
 )
+from verifiable_observability.simulation.domains.ecommerce.seed_rules import (
+    load_seed_rules_into_bank as load_ecommerce_rules,
+)
 from verifiable_observability.storage.db import (
     RuleStore,
     TrajectoryStore,
@@ -864,6 +867,7 @@ _SEED_LOADERS = {
     Domain.FINANCE: (load_finance_rules, "finance_seed_v1"),
     Domain.HEALTHCARE: (load_healthcare_rules, "healthcare_seed_v1"),
     Domain.CODE_EXECUTION: (load_code_exec_rules, "code_execution_seed_v1"),
+    Domain.ECOMMERCE: (load_ecommerce_rules, "ecommerce_seed_v1"),
 }
 
 
