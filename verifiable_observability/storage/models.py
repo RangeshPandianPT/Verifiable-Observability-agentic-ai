@@ -26,6 +26,7 @@ class Domain(str, Enum):
     FINANCE = "finance"
     HEALTHCARE = "healthcare"
     CODE_EXECUTION = "code_execution"
+    ECOMMERCE = "ecommerce"
     UNKNOWN = "unknown"
 
 
