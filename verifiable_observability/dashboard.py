@@ -750,29 +750,29 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             </div>
         </div>
         <nav class="sidebar-nav">
-            <a href="#" class="nav-item">
+            <a href="#overview" class="nav-item" onclick="switchPage('overview')">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
                 Overview
             </a>
-            <a href="#" class="nav-item active">
+            <a href="#trajectories" class="nav-item active" onclick="switchPage('trajectories')">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
                 Trajectories
             </a>
-            <a href="#" class="nav-item">
+            <a href="#agent-runs" class="nav-item" onclick="switchPage('agent-runs')">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
                 Agent Runs
             </a>
-            <a href="#" class="nav-item">
+            <a href="#drift-detection" class="nav-item" onclick="switchPage('drift-detection')">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
                 Drift Detection
             </a>
-            <a href="#" class="nav-item">
+            <a href="#policies" class="nav-item" onclick="switchPage('policies')">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
                 Policies
             </a>
         </nav>
         <div style="padding: 20px 12px; border-top: 1px solid var(--border);">
-            <a href="#" class="nav-item">
+            <a href="#settings" class="nav-item" onclick="switchPage('settings')">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
                 Settings
             </a>
@@ -800,7 +800,20 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             </div>
         </header>
 
-        <div class="dashboard-container">
+        <!-- OVERVIEW PAGE -->
+        <div id="page-overview" class="dashboard-container" style="display: none;">
+            <div class="card">
+                <div class="card-header">SYSTEM OVERVIEW</div>
+                <div class="empty-state">
+                    <div style="font-size:32px; margin-bottom: 12px;">📊</div>
+                    <div style="font-size:14px; color: var(--text-primary); font-weight:600; margin-bottom: 6px;">Overview Dashboard</div>
+                    <p style="font-size:13px;">High-level system metrics and performance trends will appear here.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- TRAJECTORIES PAGE -->
+        <div id="page-trajectories" class="dashboard-container">
             <!-- Top section: Console and Analytics -->
             <div class="grid-2">
                 <!-- Agent Console -->
@@ -913,6 +926,54 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 </div>
             </div>
         </div>
+
+        <!-- AGENT RUNS PAGE -->
+        <div id="page-agent-runs" class="dashboard-container" style="display: none;">
+            <div class="card">
+                <div class="card-header">AGENT RUNS</div>
+                <div class="empty-state">
+                    <div style="font-size:32px; margin-bottom: 12px;">🤖</div>
+                    <div style="font-size:14px; color: var(--text-primary); font-weight:600; margin-bottom: 6px;">Agent Execution History</div>
+                    <p style="font-size:13px;">Detailed logs and memory states for individual agent runs.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- DRIFT DETECTION PAGE -->
+        <div id="page-drift-detection" class="dashboard-container" style="display: none;">
+            <div class="card">
+                <div class="card-header">DRIFT DETECTION</div>
+                <div class="empty-state">
+                    <div style="font-size:32px; margin-bottom: 12px;">📈</div>
+                    <div style="font-size:14px; color: var(--text-primary); font-weight:600; margin-bottom: 6px;">Behavioral Drift Analysis</div>
+                    <p style="font-size:13px;">Monitor agent behavior changes and performance degradation over time.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- POLICIES PAGE -->
+        <div id="page-policies" class="dashboard-container" style="display: none;">
+            <div class="card">
+                <div class="card-header">SAFETY POLICIES & CONSTRAINTS</div>
+                <div class="empty-state">
+                    <div style="font-size:32px; margin-bottom: 12px;">🛡️</div>
+                    <div style="font-size:14px; color: var(--text-primary); font-weight:600; margin-bottom: 6px;">Policy Management</div>
+                    <p style="font-size:13px;">Define and manage Constraint Check Models (CCMs) and fail-safe rules.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- SETTINGS PAGE -->
+        <div id="page-settings" class="dashboard-container" style="display: none;">
+            <div class="card">
+                <div class="card-header">SYSTEM SETTINGS</div>
+                <div class="empty-state">
+                    <div style="font-size:32px; margin-bottom: 12px;">⚙️</div>
+                    <div style="font-size:14px; color: var(--text-primary); font-weight:600; margin-bottom: 6px;">Configuration</div>
+                    <p style="font-size:13px;">Manage database connections, API keys, and system preferences.</p>
+                </div>
+            </div>
+        </div>
     </main>
 
     <!-- Drawer Overlay -->
@@ -932,6 +993,33 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     </div>
 
     <script>
+        function switchPage(pageId) {
+            document.querySelectorAll('.nav-item').forEach(el => {
+                if(el.getAttribute('href') === '#' + pageId) {
+                    el.classList.add('active');
+                } else {
+                    el.classList.remove('active');
+                }
+            });
+            
+            const pages = ['overview', 'trajectories', 'agent-runs', 'drift-detection', 'policies', 'settings'];
+            pages.forEach(p => {
+                const el = document.getElementById('page-' + p);
+                if(el) {
+                    el.style.display = (p === pageId) ? 'flex' : 'none';
+                }
+            });
+            
+            window.history.pushState(null, null, '#' + pageId);
+        }
+        
+        window.addEventListener('DOMContentLoaded', () => {
+            const hash = window.location.hash.replace('#', '');
+            if(hash && ['overview', 'trajectories', 'agent-runs', 'drift-detection', 'policies', 'settings'].includes(hash)) {
+                switchPage(hash);
+            }
+        });
+
         function toggleTheme() {
             const html = document.documentElement;
             if (html.getAttribute('data-theme') === 'dark') {
