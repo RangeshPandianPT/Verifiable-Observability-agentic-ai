@@ -242,7 +242,7 @@ def rulebank_list(
 
     if seed:
         console.print("[dim]Loading Finance seed rules...[/dim]")
-        load_seed_rules_into_bank(rule_bank, auto_verify=True)
+        load_finance_rules(rule_bank, auto_verify=True)
 
     rules = rule_bank.query(domain=domain, status=status)
 
