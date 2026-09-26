@@ -12,7 +12,7 @@ import verifiable_observability.core.constraint_monitor as ccm_module
 from verifiable_observability.storage.models import Action, ComplianceDecision, Trajectory, Task, Domain, StrategyProfile, RiskTier
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)    
 
 def generate_pareto_curve():
     # We will temporarily modify the strictness of FinanceCCM and measure the effect

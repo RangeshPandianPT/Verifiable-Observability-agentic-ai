@@ -463,11 +463,55 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         .status-info { background-color: rgba(96, 165, 250, 0.1); color: var(--info); border: 1px solid rgba(96,165,250,0.2); }
 
         .truncate-cell {
-            max-width: 200px;
+            max-width: 260px;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
             color: var(--text-secondary);
+        }
+
+        /* Blocked failure reason badge in the table */
+        .fail-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            background: var(--danger-bg);
+            color: var(--danger);
+            border: 1px solid rgba(251,113,133,0.3);
+            border-radius: 6px;
+            padding: 2px 8px;
+            font-size: 11px;
+            font-weight: 600;
+            max-width: 240px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            cursor: help;
+            position: relative;
+        }
+        .fail-badge::before { content: '⛔'; font-size: 10px; flex-shrink: 0; }
+
+        /* CSS tooltip on hover */
+        .fail-badge[data-tip]:hover::after {
+            content: attr(data-tip);
+            position: absolute;
+            bottom: calc(100% + 6px);
+            left: 0;
+            background: #1e1e2e;
+            color: #f8f8f2;
+            border: 1px solid rgba(251,113,133,0.5);
+            border-radius: 8px;
+            padding: 8px 12px;
+            font-size: 12px;
+            font-weight: 400;
+            white-space: pre-wrap;
+            word-break: break-word;
+            max-width: 340px;
+            width: max-content;
+            z-index: 9999;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+            pointer-events: none;
+            line-height: 1.5;
         }
 
         /* Drawer */
@@ -1144,9 +1188,21 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             data.forEach(t => {
                 const tr = document.createElement('tr');
                 tr.onclick = () => openDrawer(t.full_id);
-                
-                let failReason = t.failure_reason || '-';
-                
+
+                // Build failure reason cell
+                let failCellHtml;
+                const rawReason = t.failure_reason || '';
+                if (rawReason && t.outcome === 'blocked') {
+                    // Strip leading prefix labels for display, keep full text in tooltip
+                    const displayText = rawReason.length > 60
+                        ? rawReason.slice(0, 60) + '…'
+                        : rawReason;
+                    const safeTooltip = rawReason.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+                    failCellHtml = `<span class="fail-badge" data-tip="${safeTooltip}">${displayText}</span>`;
+                } else {
+                    failCellHtml = `<span style="color:var(--text-secondary)">—</span>`;
+                }
+
                 tr.innerHTML = `
                     <td><span class="mono">${t.trajectory_id}</span></td>
                     <td><span class="mono">${t.model}</span></td>
@@ -1156,7 +1212,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     <td class="mono">${t.avg_rcr}</td>
                     <td class="mono">${t.avg_ccr}</td>
                     <td>${getDriftBadge(t.drift)}</td>
-                    <td class="truncate-cell" title="${failReason.replace(/"/g, '&quot;')}">${failReason}</td>
+                    <td>${failCellHtml}</td>
                 `;
                 tbody.appendChild(tr);
             });
@@ -1606,8 +1662,14 @@ def index(request: Request):
 
 @app.post("/run_task", response_class=RedirectResponse)
 async def run_task(prompt: str = Form(...), domain: str = Form(...)):
+    import urllib.parse
     from verifiable_observability.core.orchestrator import Orchestrator
     from verifiable_observability.agent.factory import build_adapter
+    from verifiable_observability.agent.ollama_adapter import (
+        OllamaUnavailableError,
+        OllamaModelNotFoundError,
+    )
+    from verifiable_observability.agent.adapter import ScriptedAgentAdapter, AgentResponse
     from verifiable_observability.core.constraint_monitor import build_ccm, StubCCM
     from verifiable_observability.core.rule_bank import RuleBank, StubRuleBank
     from verifiable_observability.core.strategy_profiler import StrategyProfiler
@@ -1623,35 +1685,51 @@ async def run_task(prompt: str = Form(...), domain: str = Form(...)):
         task_domain = Domain(domain.lower())
     except ValueError:
         task_domain = Domain.UNKNOWN
-    
+
     try:
         ccm = build_ccm(task_domain.value)
     except KeyError:
         ccm = StubCCM()
 
-    # Use ollama backend now that the server is running locally
-    info = build_adapter("ollama")
-    
+    # Try Ollama; fall back gracefully if it is not running
+    try:
+        info = build_adapter("ollama")
+        agent_adapter = info.adapter
+        agent_backend = info.backend
+        model_name = info.model_name
+    except (OllamaUnavailableError, OllamaModelNotFoundError) as exc:
+        error_msg = urllib.parse.quote(str(exc).splitlines()[0], safe="")
+        return RedirectResponse(url=f"/?error={error_msg}", status_code=303)
+    except Exception as exc:
+        error_msg = urllib.parse.quote(f"Adapter error: {exc}", safe="")
+        return RedirectResponse(url=f"/?error={error_msg}", status_code=303)
+
     orchestrator = Orchestrator(
         strategy_profiler=StrategyProfiler(),
         rule_bank=rule_bank,
         ccm=ccm,
-        agent_adapter=info.adapter,
+        agent_adapter=agent_adapter,
         trajectory_store=traj_store,
         metrics_engine=BasicMetricsEngine(),
         max_turns=5,
-        agent_backend=info.backend,
-        model_name=info.model_name,
+        agent_backend=agent_backend,
+        model_name=model_name,
     )
-    
+
     task = Task(
         domain=task_domain,
         description=prompt,
     )
-    
-    # Run the orchestrator in the main thread (blocks for a bit, but fast with scripted backend)
-    orchestrator.run(task)
-    
+
+    try:
+        orchestrator.run(task)
+    except (OllamaUnavailableError, OllamaModelNotFoundError) as exc:
+        error_msg = urllib.parse.quote(str(exc).splitlines()[0], safe="")
+        return RedirectResponse(url=f"/?error={error_msg}", status_code=303)
+    except Exception as exc:
+        error_msg = urllib.parse.quote(f"Run failed: {exc}", safe="")
+        return RedirectResponse(url=f"/?error={error_msg}", status_code=303)
+
     # Redirect back to index
     return RedirectResponse(url="/", status_code=303)
 

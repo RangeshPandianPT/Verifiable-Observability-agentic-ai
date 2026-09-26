@@ -710,14 +710,6 @@ class BasicMetricsEngine(MetricsEngineBase):
         for traj, regime in zip(trajectories, regimes):
             report = self.detect_drift(traj, regime=regime)
             summary = self.trajectory_summary(traj)
-            
-            display_outcome = traj.outcome.value
-            if traj.outcome.value == "completed":
-                for turn in traj.turns:
-                    if any(cc.decision.value == "FLAG" for cc in turn.constraint_checks):
-                        display_outcome = "flagged"
-                        break
-
             rows.append(
                 {
                     "trajectory_id": traj.trajectory_id[:12] + "…",
@@ -725,7 +717,7 @@ class BasicMetricsEngine(MetricsEngineBase):
                     "model": traj.model_name,
                     "regime": regime or "—",
                     "turns": len(traj.turns),
-                    "outcome": display_outcome,
+                    "outcome": traj.outcome.value,
                     "avg_rcr": (
                         f"{report.avg_rcr:.3f}" if report.avg_rcr is not None else "—"
                     ),
