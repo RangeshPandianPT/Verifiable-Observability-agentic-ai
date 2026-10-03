@@ -44,6 +44,20 @@ from verifiable_observability.storage.models import (
 logger = logging.getLogger(__name__)
 
 
+class OrchestratorCallback:
+    """Base class for receiving orchestrator events (e.g. for Live TUIs)."""
+    def on_trajectory_start(self, task: Task, profile, trajectory: Trajectory): pass
+    def on_input_guardrail_check(self, decision, reason: str): pass
+    def on_turn_start(self, turn_index: int): pass
+    def on_agent_response(self, agent_resp): pass
+    def on_rule_check(self, rule_check): pass
+    def on_ccm_check(self, ccm_result): pass
+    def on_action_dispatch(self, action, result): pass
+    def on_turn_end(self, turn: Turn): pass
+    def on_trajectory_end(self, trajectory: Trajectory): pass
+
+
+
 class Orchestrator:
     """
     Central coordinator: drives the think→check→act loop and records everything.
@@ -69,6 +83,7 @@ class Orchestrator:
         metrics_engine: MetricsEngineBase | None = None,
         ticket_validator: TicketValidator | None = None,
         alerter: AlerterBase | None = None,
+        callbacks: list[OrchestratorCallback] | None = None,
         max_turns: int = 20,
         agent_backend: str = "unknown",
         model_name: str = "unknown",
@@ -81,6 +96,7 @@ class Orchestrator:
         self.metrics_engine: MetricsEngineBase = metrics_engine or BasicMetricsEngine()
         self.ticket_validator = ticket_validator
         self.alerter = alerter
+        self.callbacks = callbacks or []
         self.max_turns = max_turns
         self.agent_backend = agent_backend
         self.model_name = model_name
@@ -112,6 +128,9 @@ class Orchestrator:
             profile.confidence,
         )
 
+        for cb in self.callbacks:
+            cb.on_trajectory_start(task, profile, trajectory)
+
         # Monotonic sequence counter for execution tickets (Phase 1)
         sequence_counter = 0
 
@@ -130,15 +149,23 @@ class Orchestrator:
 
         if input_check.decision == ComplianceDecision.BLOCK:
             logger.warning("Trajectory %s blocked at Input Guardrail", trajectory.trajectory_id[:8])
+            reason = "; ".join(v.details for v in input_check.violated_constraints)
+            
+            for cb in self.callbacks:
+                cb.on_input_guardrail_check(input_check.decision.value, reason)
+
             trajectory.outcome = TrajectoryOutcome.BLOCKED
-            trajectory.failure_reason = "Prompt Blocked by CCM: " + "; ".join(
-                v.details for v in input_check.violated_constraints
-            )
+            trajectory.failure_reason = "Prompt Blocked by CCM: " + reason
             trajectory.completed_at = datetime.now(timezone.utc)
             self.trajectory_store.save(trajectory)
             if self.alerter:
                 self.alerter.notify_block(trajectory)
+            for cb in self.callbacks:
+                cb.on_trajectory_end(trajectory)
             return trajectory
+
+        for cb in self.callbacks:
+            cb.on_input_guardrail_check(input_check.decision.value, "Passed")
 
         # Build a system prompt for the agent
         system_prompt = self._build_system_prompt(task, profile)
@@ -147,6 +174,9 @@ class Orchestrator:
         for turn_index in range(self.max_turns):
             turn = Turn(turn_index=turn_index)
             logger.info("--- Turn %d ---", turn_index)
+            
+            for cb in self.callbacks:
+                cb.on_turn_start(turn_index)
 
             # --- 1. Agent generates a response ---
             agent_resp = self.agent_adapter.generate(
@@ -177,6 +207,9 @@ class Orchestrator:
             turn.decisions.append(decision)
             if intended_action:
                 turn.actions.append(intended_action)
+                
+            for cb in self.callbacks:
+                cb.on_agent_response(agent_resp)
 
             # --- 3. Rule Bank check (Semantic) ---
             # Phase 4: Asynchronous Semantic Path for LOW/MEDIUM risk tasks
@@ -193,6 +226,8 @@ class Orchestrator:
                     rule_check.confidence,
                     rule_check.match_method,
                 )
+                for cb in self.callbacks:
+                    cb.on_rule_check(rule_check)
 
             # --- 4. CCM check (only if there's an action) ---
             if intended_action:
@@ -221,6 +256,9 @@ class Orchestrator:
                     ccm_result.decision.value,
                     [v.constraint_id for v in ccm_result.violated_constraints],
                 )
+                
+                for cb in self.callbacks:
+                    cb.on_ccm_check(ccm_result)
 
                 if ccm_result.decision == ComplianceDecision.BLOCK:
                     # Hard stop — do NOT dispatch the action
@@ -270,6 +308,8 @@ class Orchestrator:
             # --- 5. Simulated dispatch ---
             if intended_action:
                 turn.tool_result = self._simulate_dispatch(intended_action)
+                for cb in self.callbacks:
+                    cb.on_action_dispatch(intended_action, turn.tool_result)
 
             # --- 5b. Collect Asynchronous Semantic Check (Phase 4) ---
             if rule_check_future is not None:
@@ -282,6 +322,8 @@ class Orchestrator:
                         rule_check.confidence,
                         rule_check.match_method,
                     )
+                    for cb in self.callbacks:
+                        cb.on_rule_check(rule_check)
                 except Exception as exc:
                     logger.error("Asynchronous semantic check failed: %s", exc)
                     # For safety, we can append a failed RuleCheckResult or skip
@@ -290,6 +332,9 @@ class Orchestrator:
             # --- 6. Metrics ---
             self.metrics_engine.record_turn(turn)
             trajectory.turns.append(turn)
+            
+            for cb in self.callbacks:
+                cb.on_turn_end(turn)
 
             # Update conversation history for the next turn
             conversation.append(
@@ -333,6 +378,9 @@ class Orchestrator:
                         self.alerter.notify_drift(trajectory, report)
                 except Exception as exc:
                     logger.error("Failed to run drift detection for alerting: %s", exc)
+
+        for cb in self.callbacks:
+            cb.on_trajectory_end(trajectory)
 
         return trajectory
 
