@@ -53,6 +53,7 @@ from verifiable_observability.storage.db import (
     create_db_engine,
 )
 from verifiable_observability.storage.models import Domain, Rule, Task
+from verifiable_observability.cli.live_tui import LiveTUI
 
 app = typer.Typer(
     name="vo",
@@ -369,6 +370,7 @@ def run(
     ] = True,
     verbose: Annotated[bool, typer.Option("--verbose", "-v")] = False,
     db: Annotated[str, typer.Option(help="Path to SQLite DB")] = "verifiable_observability.db",
+    live: Annotated[bool, typer.Option("--live", help="Run with an interactive real-time terminal visualizer (TUI).")] = False,
 ):
     """
     [bold]Phase 4[/bold] — Run a real LLM agent trajectory with full verification.
@@ -467,11 +469,19 @@ def run(
     )
 
     try:
+        if live:
+            tui = LiveTUI()
+            orchestrator.callbacks = [tui]
+            tui.start()
         trajectory = orchestrator.run(task)
+        if live:
+            tui.stop()
     except (OllamaUnavailableError, OllamaModelNotFoundError) as exc:
+        if live: tui.stop()
         console.print(f"[red bold]Ollama error:[/red bold] {exc}")
         raise typer.Exit(1)
     except Exception as exc:
+        if live: tui.stop()
         console.print(f"[red]LLM run failed:[/] {exc}")
         raise typer.Exit(1)
 
@@ -667,6 +677,7 @@ def regime_run(
     ] = True,
     db: Annotated[str, typer.Option(help="Path to SQLite DB")] = "verifiable_observability.db",
     verbose: Annotated[bool, typer.Option("--verbose", "-v")] = False,
+    live: Annotated[bool, typer.Option("--live", help="Run with an interactive real-time terminal visualizer (TUI).")] = False,
 ):
     """
     [bold]Phase 5[/bold] — Run a scripted behavioral regime through the full verification stack.
@@ -758,7 +769,17 @@ def regime_run(
     )
 
     console.print(f"[bold]Task:[/] {task_description}")
-    trajectory = orchestrator.run(task)
+    
+    if live:
+        tui = LiveTUI()
+        orchestrator.callbacks = [tui]
+        tui.start()
+        
+    try:
+        trajectory = orchestrator.run(task)
+    finally:
+        if live:
+            tui.stop()
 
     # --- Results ---
     outcome_color = {
@@ -793,7 +814,7 @@ def regime_run(
 
     # Drift report
     drift_color = "bold red" if report.drift_detected else "bold green"
-    drift_label = "⚠ DRIFT DETECTED" if report.drift_detected else "✓ No drift detected"
+    drift_label = ":warning: DRIFT DETECTED" if report.drift_detected else "[OK] No drift detected"
     drift_info = (
         "  Reasons:\n" + "\n".join(f"  • {r}" for r in report.drift_reasons)
         if report.drift_reasons
