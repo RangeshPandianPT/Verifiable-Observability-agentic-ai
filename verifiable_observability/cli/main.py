@@ -384,7 +384,7 @@ def run(
     Example::
 
         vo run "Transfer $500 from ACC-001 to ACC-002"
-        vo run "Transfer $500" --backend ollama --model llama3.2:3b
+        vo run "Transfer $500" --backend ollama --model llama2:7b
         vo run "Rebalance my portfolio" --backend openai --model gpt-4o --verbose
         vo run "Check account balance" --backend anthropic
     """
