@@ -709,6 +709,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         
         .empty-state { text-align: center; padding: 40px; color: var(--text-secondary); }
     </style>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
     <div id="processingOverlay" class="proc-overlay">
@@ -844,6 +845,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                     Operational
                 </div>
                 <div id="last-updated">Updated just now</div>
+                <div id="live-indicator" style="display:flex; align-items:center; gap:6px; color:var(--success); font-weight:600; font-size:12px; margin-left:12px;"><span class="status-dot" style="animation: pulse 1s infinite;"></span> LIVE</div>
                 <div class="phase-badge">Phase 9</div>
             </div>
         </header>
@@ -1033,10 +1035,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <div id="page-drift-detection" class="dashboard-container" style="display: none;">
             <div class="card">
                 <div class="card-header">DRIFT DETECTION</div>
-                <div class="empty-state">
-                    <div style="font-size:32px; margin-bottom: 12px;">📈</div>
-                    <div style="font-size:14px; color: var(--text-primary); font-weight:600; margin-bottom: 6px;">Behavioral Drift Analysis</div>
-                    <p style="font-size:13px;">Monitor agent behavior changes and performance degradation over time.</p>
+                <div style="padding: 24px;">
+                    <div style="margin-bottom: 24px; font-size: 14px; color: var(--text-secondary);">Real-time tracking of Reasoning Consistency Ratio (RCR) and Constraint Compliance Ratio (CCR).</div>
+                    <div style="position: relative; height: 350px; width: 100%;">
+                        <canvas id="driftChart"></canvas>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1400,6 +1403,91 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         }
 
         document.addEventListener('DOMContentLoaded', renderDashboard);
+
+        // Real-time updates and Chart rendering
+        let driftChart = null;
+        
+        function updateChart(data) {
+            const ctx = document.getElementById('driftChart');
+            if (!ctx) return;
+            
+            // sort chronologically (oldest first if data is newest first, assuming data is newest first)
+            const sorted = [...data].reverse();
+            
+            const labels = sorted.map(t => t.trajectory_id.slice(0, 8));
+            const rcrData = sorted.map(t => parseFloat(t.avg_rcr));
+            const ccrData = sorted.map(t => parseFloat(t.avg_ccr));
+
+            if (driftChart) {
+                driftChart.data.labels = labels;
+                driftChart.data.datasets[0].data = rcrData;
+                driftChart.data.datasets[1].data = ccrData;
+                driftChart.update();
+            } else {
+                driftChart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: labels,
+                        datasets: [
+                            {
+                                label: 'Reasoning Consistency (RCR)',
+                                data: rcrData,
+                                borderColor: '#8B5CF6',
+                                backgroundColor: 'rgba(139, 92, 246, 0.1)',
+                                tension: 0.3,
+                                fill: true
+                            },
+                            {
+                                label: 'Constraint Compliance (CCR)',
+                                data: ccrData,
+                                borderColor: '#10B981',
+                                backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                                tension: 0.3,
+                                fill: true
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        interaction: { mode: 'index', intersect: false },
+                        scales: {
+                            y: { min: 0, max: 1.1, grid: { color: 'rgba(255,255,255,0.05)' } },
+                            x: { grid: { display: false } }
+                        },
+                        plugins: { legend: { labels: { color: '#8491A7' } } }
+                    }
+                });
+            }
+        }
+
+        async function fetchLiveUpdates() {
+            try {
+                const res = await fetch('/api/data');
+                if (!res.ok) return;
+                const newData = await res.json();
+                
+                if (newData.rows && JSON.stringify(newData.rows) !== JSON.stringify(window.trajectories)) {
+                    window.trajectories = newData.rows;
+                    window.detailsMap = newData.details;
+                    renderDashboard();
+                    updateChart(window.trajectories);
+                    document.getElementById('last-updated').innerText = 'Updated ' + new Date().toLocaleTimeString();
+                }
+            } catch(e) {
+                console.error("Live update failed", e);
+            }
+        }
+
+        // Initialize chart on first load
+        document.addEventListener('DOMContentLoaded', () => {
+            if (window.trajectories) {
+                updateChart(window.trajectories);
+            }
+            // Poll every 3 seconds
+            setInterval(fetchLiveUpdates, 3000);
+        });
+
         // Cinematic Processing Overlay Logic
         let procStatusInterval;
         let procNodeInterval;
@@ -1761,6 +1849,40 @@ def index(request: Request):
     json_str = json.dumps(data_payload)
     
     return HTML_TEMPLATE.replace("{traj_data_json}", json_str)
+
+
+@app.get("/api/data")
+def api_data():
+    engine = create_db_engine(_DB_PATH)
+    traj_store = TrajectoryStore(engine)
+    metrics_engine = BasicMetricsEngine()
+
+    summaries = traj_store.list_trajectories(limit=100)
+    trajectories = []
+    for s in summaries:
+        try:
+            t = traj_store.load(s["trajectory_id"])
+            if t is not None:
+                trajectories.append(t)
+        except ValueError:
+            continue
+    
+    rows = []
+    if trajectories:
+        rows = metrics_engine.compare_trajectories(trajectories)
+        for r, t in zip(rows, trajectories):
+            r["full_id"] = t.trajectory_id
+
+    details_map = {}
+    for t in trajectories:
+        details_map[t.trajectory_id] = {
+            "timeline": _extract_timeline(t)
+        }
+
+    return {
+        "rows": rows,
+        "details": details_map
+    }
 
 @app.post("/run_task", response_class=RedirectResponse)
 async def run_task(prompt: str = Form(...), domain: str = Form(...)):

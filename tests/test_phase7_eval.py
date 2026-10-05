@@ -59,3 +59,4 @@ def test_eval_harness_regimes(temp_config_path, temp_db_path, tmp_path):
         assert "avg_rcr" in r
         assert "avg_ccr" in r
         assert r["outcome"] in ["completed", "truncated", "blocked", "failed", "in_progress"]
+    
