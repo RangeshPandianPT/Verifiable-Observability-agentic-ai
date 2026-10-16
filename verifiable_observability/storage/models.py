@@ -266,6 +266,10 @@ class Turn(BaseModel):
     constraint_checks: list[ConstraintCheckResult] = Field(default_factory=list)
     tool_result: dict[str, Any] | None = None  # simulated tool output
     metrics: TurnMetrics = Field(default_factory=TurnMetrics)
+    intervention_prompt: str | None = Field(
+        default=None,
+        description="Remediation prompt injected into the loop when a constraint block is intercepted.",
+    )
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
@@ -278,6 +282,14 @@ class Trajectory(BaseModel):
     turns: list[Turn] = Field(default_factory=list)
     outcome: TrajectoryOutcome = TrajectoryOutcome.IN_PROGRESS
     failure_reason: str | None = None
+    self_healed: bool = Field(
+        default=False,
+        description="True if an intercepted constraint violation was successfully corrected via remediation.",
+    )
+    remediation_count: int = Field(
+        default=0,
+        description="Number of counterfactual verifier remediation attempts executed.",
+    )
     # Backend provenance — enables cross-model RCR/CCR comparison (Phase 5-7)
     agent_backend: str = "unknown"   # "ollama" | "anthropic" | "openai" | "scripted"
     model_name: str = "unknown"      # e.g. "llama3.2:3b", "claude-3-5-sonnet-20241022"
