@@ -29,6 +29,7 @@ from verifiable_observability.core.metrics import BasicMetricsEngine, MetricsEng
 from verifiable_observability.core.rule_bank import RuleBankBase
 from verifiable_observability.core.strategy_profiler import StrategyProfilerBase
 from verifiable_observability.core.alerting import AlerterBase
+from verifiable_observability.core.remediation import generate_remediation_guidance
 from verifiable_observability.storage.db import TrajectoryStore
 from verifiable_observability.storage.models import (
     Action,
@@ -53,6 +54,8 @@ class OrchestratorCallback:
     def on_rule_check(self, rule_check): pass
     def on_ccm_check(self, ccm_result): pass
     def on_action_dispatch(self, action, result): pass
+    def on_intervention(self, turn_index: int, ccm_result, remediation_prompt: str): pass
+    def on_self_heal(self, turn_index: int, action: Action): pass
     def on_turn_end(self, turn: Turn): pass
     def on_trajectory_end(self, trajectory: Trajectory): pass
 
@@ -85,6 +88,8 @@ class Orchestrator:
         alerter: AlerterBase | None = None,
         callbacks: list[OrchestratorCallback] | None = None,
         max_turns: int = 20,
+        enable_self_healing: bool = False,
+        max_remediation_attempts: int = 2,
         agent_backend: str = "unknown",
         model_name: str = "unknown",
     ) -> None:
@@ -98,6 +103,8 @@ class Orchestrator:
         self.alerter = alerter
         self.callbacks = callbacks or []
         self.max_turns = max_turns
+        self.enable_self_healing = enable_self_healing
+        self.max_remediation_attempts = max_remediation_attempts
         self.agent_backend = agent_backend
         self.model_name = model_name
         
@@ -133,6 +140,8 @@ class Orchestrator:
 
         # Monotonic sequence counter for execution tickets (Phase 1)
         sequence_counter = 0
+        remediation_attempts = 0
+        effective_self_healing = task.metadata.get("self_healing", self.enable_self_healing)
 
         # --- NEW: Phase 9 Input Guardrail Pre-flight Check ---
         prompt_action = Action(
@@ -261,12 +270,50 @@ class Orchestrator:
                     cb.on_ccm_check(ccm_result)
 
                 if ccm_result.decision == ComplianceDecision.BLOCK:
+                    if effective_self_healing and remediation_attempts < self.max_remediation_attempts:
+                        remediation_attempts += 1
+                        remediation_prompt = generate_remediation_guidance(
+                            intended_action, ccm_result, task.domain
+                        )
+                        turn.intervention_prompt = remediation_prompt
+                        self.metrics_engine.record_turn(turn)
+                        trajectory.turns.append(turn)
+                        for cb in self.callbacks:
+                            cb.on_intervention(turn_index, ccm_result, remediation_prompt)
+                            cb.on_turn_end(turn)
+
+                        logger.info(
+                            "CCM intercepted violation at turn %d. Self-healing remediation attempt %d/%d injected.",
+                            turn_index,
+                            remediation_attempts,
+                            self.max_remediation_attempts,
+                        )
+                        conversation.append(
+                            {
+                                "role": "assistant",
+                                "content": agent_resp.raw_text or agent_resp.reasoning,
+                            }
+                        )
+                        conversation.append(
+                            {
+                                "role": "user",
+                                "content": remediation_prompt,
+                            }
+                        )
+                        continue
+
                     # Hard stop — do NOT dispatch the action
                     self.metrics_engine.record_turn(turn)
                     trajectory.turns.append(turn)
                     trajectory.outcome = TrajectoryOutcome.BLOCKED
+                    reason_prefix = "CCM BLOCK"
+                    if remediation_attempts > 0:
+                        reason_prefix = (
+                            f"CCM BLOCK (Self-healing exhausted after {remediation_attempts} attempts)"
+                        )
+                        trajectory.remediation_count = remediation_attempts
                     trajectory.failure_reason = (
-                        f"CCM BLOCK at turn {turn_index}: "
+                        f"{reason_prefix} at turn {turn_index}: "
                         + "; ".join(
                             v.details
                             for v in ccm_result.violated_constraints
@@ -275,6 +322,19 @@ class Orchestrator:
                     if self.alerter:
                         self.alerter.notify_block(trajectory)
                     break
+
+                # Self-healing successful resolution check
+                if remediation_attempts > 0 and not trajectory.self_healed:
+                    trajectory.self_healed = True
+                    trajectory.remediation_count = remediation_attempts
+                    for cb in self.callbacks:
+                        cb.on_self_heal(turn_index, intended_action)
+                    logger.info(
+                        "Trajectory %s self-healed successfully at turn %d after %d remediations!",
+                        trajectory.trajectory_id[:8],
+                        turn_index,
+                        remediation_attempts,
+                    )
 
                 # --- 4b. Validate execution ticket before dispatch (Phase 1a) ---
                 if (
@@ -354,11 +414,16 @@ class Orchestrator:
             # --- 7. Termination check ---
             if agent_resp.is_final:
                 trajectory.outcome = TrajectoryOutcome.COMPLETED
+                if remediation_attempts > 0:
+                    trajectory.self_healed = True
+                    trajectory.remediation_count = remediation_attempts
                 break
 
         else:
             # Exited via for-loop (max_turns reached)
             trajectory.outcome = TrajectoryOutcome.TRUNCATED
+            if remediation_attempts > 0:
+                trajectory.remediation_count = remediation_attempts
 
         trajectory.completed_at = datetime.now(timezone.utc)
         self.trajectory_store.save(trajectory)
