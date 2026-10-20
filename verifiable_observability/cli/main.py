@@ -1038,9 +1038,133 @@ def dashboard(
 
 
 # ---------------------------------------------------------------------------
+# Phase 6/7 Commands — Formal Verification, Cryptographic Audit & Verifier Tax
+# ---------------------------------------------------------------------------
+
+
+@app.command("verify-rules")
+def verify_rules_cmd(
+    domain: Annotated[Optional[str], typer.Option(help="Filter by domain (finance, healthcare, code_execution, ecommerce)")] = None,
+    db: Annotated[str, typer.Option(help="Path to SQLite DB")] = "verifiable_observability.db",
+):
+    """
+    [bold]Formal Logic[/bold] — Run SMT-style static consistency checking over the Rule Bank.
+    Detects direct contradictions, parameter clashes, shadowed rules, and domain coverage gaps.
+    """
+    from verifiable_observability.core.rule_verifier import RuleVerifier
+    from verifiable_observability.storage.db import RuleStore, create_db_engine
+    
+    engine = create_db_engine(db)
+    rule_store = RuleStore(engine)
+    rules = rule_store.list_rules()
+    
+    target_domain = None
+    if domain:
+        try:
+            target_domain = Domain(domain.lower())
+        except ValueError:
+            console.print(f"[red]Invalid domain: {domain}[/red]")
+            raise typer.Exit(1)
+            
+    verifier = RuleVerifier(domain=target_domain)
+    report = verifier.verify_rule_set(rules, domain=target_domain)
+    
+    console.rule("[bold cyan]Rule Bank Formal Consistency Report[/bold cyan]")
+    status_str = "[bold green]SOUND (No Critical Conflicts)[/bold green]" if report.is_sound else "[bold red]UNSOUND (Conflicts Detected)[/bold red]"
+    console.print(f"Domain Filter: [bold]{target_domain.value if target_domain else 'ALL'}[/bold] | Rules Checked: {report.total_rules_inspected} | Status: {status_str}")
+    
+    if report.conflicts:
+        t = Table(title="Identified Rule Conflicts", show_header=True, header_style="bold magenta")
+        t.add_column("Type", style="cyan")
+        t.add_column("Severity", style="yellow")
+        t.add_column("Rule A", style="dim")
+        t.add_column("Rule B", style="dim")
+        t.add_column("Description")
+        for c in report.conflicts:
+            t.add_row(c.conflict_type.value, c.severity.value, c.rule_id_a[:8], (c.rule_id_b[:8] if c.rule_id_b else "N/A"), c.description)
+        console.print(t)
+        
+    if report.coverage_gaps:
+        t_gap = Table(title="Domain Safety Coverage Gaps", show_header=True, header_style="bold red")
+        t_gap.add_column("Domain", style="cyan")
+        t_gap.add_column("Target Tool", style="bold yellow")
+        t_gap.add_column("Description")
+        t_gap.add_column("Action Needed")
+        for g in report.coverage_gaps:
+            t_gap.add_row(g.domain.value, g.target, g.description, g.recommended_action)
+        console.print(t_gap)
+
+
+@app.command("audit-cert")
+def audit_cert_cmd(
+    trajectory_id: Annotated[Optional[str], typer.Option(help="Specific trajectory UUID to audit; defaults to latest")] = None,
+    db: Annotated[str, typer.Option(help="Path to SQLite DB")] = "verifiable_observability.db",
+):
+    """
+    [bold]Cryptographic Audit[/bold] — Perform offline hash-chain and execution ticket audit.
+    Generates a cryptographically signed Verifiable Compliance Certificate (VCC).
+    """
+    from verifiable_observability.core.audit_verifier import AuditVerifier
+    from verifiable_observability.storage.db import TrajectoryStore, create_db_engine
+    
+    engine = create_db_engine(db)
+    store = TrajectoryStore(engine)
+    
+    if trajectory_id:
+        traj = store.load(trajectory_id)
+        if not traj:
+            console.print(f"[red]Trajectory {trajectory_id} not found.[/red]")
+            raise typer.Exit(1)
+    else:
+        trajs = store.list_trajectories()
+        if not trajs:
+            console.print("[yellow]No trajectories found in DB to audit.[/yellow]")
+            return
+        tid = trajs[0]["trajectory_id"] if isinstance(trajs[0], dict) else getattr(trajs[0], "trajectory_id")
+        traj = store.load(tid)
+        if not traj:
+            console.print("[red]Failed to load latest trajectory.[/red]")
+            raise typer.Exit(1)
+            
+    verifier = AuditVerifier()
+    res = verifier.verify_trajectory(traj)
+    cert = verifier.generate_compliance_certificate(traj)
+    
+    console.rule("[bold cyan]Cryptographic Audit Verification[/bold cyan]")
+    console.print(f"Trajectory ID: [bold]{traj.trajectory_id}[/bold]")
+    console.print(f"Domain: [bold]{traj.task.domain.value}[/bold] | Turns: {res.total_turns} | Actions: {res.total_actions}")
+    console.print(f"Merkle Root: [bold green]{res.merkle_root}[/bold green]")
+    console.print(f"Chain Head:  [bold cyan]{res.chain_head_hash}[/bold cyan]")
+    console.print(f"Audit Status: [bold]{res.status.value}[/bold]")
+    console.print(f"Hash Chain Integrity: {'[green]VALID[/green]' if res.hash_chain_valid else '[red]BROKEN[/red]'}")
+    console.print(f"Execution Tickets:    {'[green]VALID[/green]' if res.tickets_valid else '[red]INVALID[/red]'}")
+    
+    console.print(Panel(cert.to_json(), title="Verifiable Compliance Certificate (VCC)", border_style="green"))
+
+
+@app.command("benchmark-tax")
+def benchmark_tax_cmd(
+    bootstrap: Annotated[int, typer.Option(help="Number of bootstrap resamples")] = 200,
+):
+    """
+    [bold]Verifier Tax[/bold] — Compare Unprotected, Regex Guardrail, and Verifiable Observability.
+    Quantifies Attack Success Rate (ASR), Task Utility Retention (TUR), and the Verifier Tax.
+    """
+    from verifiable_observability.eval.baseline_comparator import BaselineComparator
+    
+    console.rule("[bold cyan]Measuring the Verifier Tax across Archetypes[/bold cyan]")
+    comparator = BaselineComparator()
+    metrics = comparator.run_benchmark(bootstrap_samples=bootstrap)
+    
+    table_md = comparator.format_markdown_table(metrics)
+    console.print(table_md)
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
 
 if __name__ == "__main__":
     app()
+
