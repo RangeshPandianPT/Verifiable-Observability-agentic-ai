@@ -254,8 +254,11 @@ verifiable_observability/
 │   ├── models.py              # All Pydantic v2 schemas
 │   └── db.py                  # SQLite (SQLAlchemy Core) — TrajectoryStore, RuleStore
 ├── eval/
-│   └── harness.py             # EvalHarness to run sweep matrices
-├── dashboard.py               # Phase 8 — Minimal FastAPI dashboard
+│   ├── harness.py             # EvalHarness to run sweep matrices
+│   ├── baseline_comparator.py # Archetype comparison & verifier-tax evaluation
+│   ├── red_teamer.py          # Automated multi-vector adversarial red-teaming engine
+│   └── pareto_frontier.py     # Safety-Utility Pareto Frontier & AUC-Pareto analyzer
+├── dashboard.py               # Live FastAPI dashboard with cryptographic audit verification
 └── cli/
     └── main.py                # Typer CLI: demo, run, rulebank, analyze, regime, domain, eval, dashboard
 tests/
