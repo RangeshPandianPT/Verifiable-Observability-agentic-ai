@@ -118,8 +118,8 @@ class ObservationPattern(BaseModel):
 
     domain: Domain | None = None
     task_type: str | None = None
-    # Numeric predicates: {"amount_usd": {"gt": 10000, "lte": 100000}}
-    numeric_conditions: dict[str, dict[str, float]] = Field(default_factory=dict)
+    # Numeric predicates: {"amount_usd": {"gt": 10000, "lte": 100000, "between": [1000, 50000]}}
+    numeric_conditions: dict[str, dict[str, Any]] = Field(default_factory=dict)
     # Keyword presence in the reasoning text
     reasoning_keywords: list[str] = Field(default_factory=list)
     # Arbitrary key=value conditions on the observation's metadata
