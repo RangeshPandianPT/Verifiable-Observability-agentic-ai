@@ -6,6 +6,9 @@ Phase 1: Full RuleBank with:
   - structured predicate + similarity matching
   - add / verify / deprecate lifecycle
   - query API for CLI/inspection
+  - high-performance in-memory caching of verified rules
+  - pluggable custom matchers (e.g. HybridMatcher)
+  - check_explain() returning transparent MatchDiagnostics
 
 The Rule Bank only returns verified rules as matches. Pending and deprecated
 rules are still stored (full audit trail) but excluded from check() results.
@@ -19,6 +22,8 @@ from datetime import datetime, timezone
 
 from verifiable_observability.core.matching import (
     CONFIDENCE_THRESHOLD,
+    MatchDiagnostics,
+    MatcherBase,
     SimilarityMatcher,
     StructuredPredicateMatcher,
 )
@@ -44,7 +49,7 @@ class RuleBankBase(ABC):
     @abstractmethod
     def add_rule(self, rule: Rule, provenance: str = "") -> Rule:
         """
-        Add a new rule.  Default verification_status is PENDING.
+        Add a new rule. Default verification_status is PENDING.
 
         Args:
             rule:       The Rule to add (rule_id generated if not set).
@@ -86,6 +91,15 @@ class RuleBankBase(ABC):
             RuleCheckResult with matched, rule_id, confidence, match_method.
         """
         ...
+
+    def check_explain(
+        self, decision: Decision
+    ) -> tuple[RuleCheckResult, MatchDiagnostics | None]:
+        """
+        Check a Decision against the Rule Bank and return detailed diagnostics.
+        Default implementation delegates to check().
+        """
+        return self.check(decision), None
 
     @abstractmethod
     def query(
@@ -137,6 +151,11 @@ class StubRuleBank(RuleBankBase):
             match_method="stub",
         )
 
+    def check_explain(
+        self, decision: Decision
+    ) -> tuple[RuleCheckResult, MatchDiagnostics | None]:
+        return self.check(decision), None
+
     def query(
         self,
         domain: str | None = None,
@@ -155,20 +174,43 @@ class RuleBank(RuleBankBase):
     Full Rule Bank implementation.
 
     Matching strategy:
-      1. Structured predicate matching (StructuredPredicateMatcher) — evaluated
-         for all VERIFIED rules.
-      2. If no rule exceeds CONFIDENCE_THRESHOLD via predicates, fall back to
-         TF-IDF cosine similarity (SimilarityMatcher).
-      3. Best match is returned; if best score < CONFIDENCE_THRESHOLD, no match.
+      1. If custom matcher provided, use custom matcher (e.g. HybridMatcher).
+      2. Otherwise, structured predicate matching evaluated for all VERIFIED rules.
+      3. If no rule exceeds CONFIDENCE_THRESHOLD via predicates, fall back to
+         similarity matching.
+      4. Best match is returned; if best score < CONFIDENCE_THRESHOLD, no match.
+
+    Performance:
+      Maintains an in-memory cache of VERIFIED rules that auto-invalidates
+      on rule additions, verifications, or deprecations.
 
     Only VERIFIED rules are returned as matches. PENDING and DEPRECATED rules
     are excluded from check() but preserved for audit via query().
     """
 
-    def __init__(self, rule_store: RuleStore) -> None:
+    def __init__(
+        self,
+        rule_store: RuleStore,
+        matcher: MatcherBase | None = None,
+        enable_cache: bool = True,
+    ) -> None:
         self._store = rule_store
         self._predicate_matcher = StructuredPredicateMatcher()
         self._similarity_matcher = SimilarityMatcher()
+        self._custom_matcher = matcher
+        self._enable_cache = enable_cache
+        self._cached_verified_rules: list[Rule] | None = None
+
+    def _invalidate_cache(self) -> None:
+        self._cached_verified_rules = None
+
+    def _get_verified_rules(self) -> list[Rule]:
+        if self._enable_cache and self._cached_verified_rules is not None:
+            return self._cached_verified_rules
+        rules = self._store.list_rules(status=VerificationStatus.VERIFIED.value)
+        if self._enable_cache:
+            self._cached_verified_rules = rules
+        return rules
 
     # ------------------------------------------------------------------
     # Lifecycle methods
@@ -180,6 +222,7 @@ class RuleBank(RuleBankBase):
         if provenance and not rule.source_trajectory_id:
             rule.source_trajectory_id = provenance
         self._store.save(rule)
+        self._invalidate_cache()
         logger.info(
             "Rule added: %s (%s) [%s]",
             rule.rule_id[:8],
@@ -197,6 +240,7 @@ class RuleBank(RuleBankBase):
         rule.verifier = verifier
         rule.updated_at = datetime.now(timezone.utc)
         self._store.save(rule)
+        self._invalidate_cache()
         logger.info("Rule verified: %s by %s", rule_id[:8], verifier)
         return rule
 
@@ -207,6 +251,7 @@ class RuleBank(RuleBankBase):
         rule.deprecation_reason = reason
         rule.updated_at = datetime.now(timezone.utc)
         self._store.save(rule)
+        self._invalidate_cache()
         logger.info("Rule deprecated: %s — %s", rule_id[:8], reason)
         return rule
 
@@ -222,67 +267,119 @@ class RuleBank(RuleBankBase):
           matched=True  if best confidence >= CONFIDENCE_THRESHOLD
           matched=False otherwise
         """
-        verified_rules = self._store.list_rules(status=VerificationStatus.VERIFIED.value)
+        res, _ = self.check_explain(decision)
+        return res
+
+    def check_explain(
+        self, decision: Decision
+    ) -> tuple[RuleCheckResult, MatchDiagnostics | None]:
+        """
+        Find the best matching VERIFIED rule and return both the RuleCheckResult
+        and the full MatchDiagnostics breakdown explaining why it matched or failed.
+        """
+        verified_rules = self._get_verified_rules()
 
         if not verified_rules:
-            return RuleCheckResult(
+            result = RuleCheckResult(
                 decision_id=decision.decision_id,
                 matched=False,
                 confidence=0.0,
                 match_method="none",
             )
+            return result, None
 
-        # Pass 1: structured predicate matching
-        best_rule, best_score, best_method = self._best_structured(
-            verified_rules, decision
-        )
+        best_rule: Rule | None = None
+        best_score = 0.0
+        best_method = "none"
+        best_diagnostics: MatchDiagnostics | None = None
 
-        # Pass 2: similarity fallback if nothing crossed threshold
-        if best_score < CONFIDENCE_THRESHOLD:
-            sim_rule, sim_score = self._best_similarity(verified_rules, decision)
-            if sim_score > best_score:
-                best_rule, best_score, best_method = sim_rule, sim_score, "similarity"
-
-        if best_score >= CONFIDENCE_THRESHOLD and best_rule is not None:
-            return RuleCheckResult(
-                decision_id=decision.decision_id,
-                matched=True,
-                rule_id=best_rule.rule_id,
-                rule_name=best_rule.name,
-                confidence=round(best_score, 4),
-                match_method=best_method,
+        if self._custom_matcher is not None:
+            for rule in verified_rules:
+                diag = self._custom_matcher.match_explain(rule, decision)
+                if diag.score > best_score:
+                    best_score = diag.score
+                    best_rule = rule
+                    best_method = diag.method
+                    best_diagnostics = diag
+        else:
+            # Pass 1: structured predicate matching
+            best_rule, best_score, best_method, best_diagnostics = self._best_structured_explain(
+                verified_rules, decision
             )
 
-        return RuleCheckResult(
-            decision_id=decision.decision_id,
-            matched=False,
-            confidence=round(best_score, 4),
-            match_method="none",
+            # Pass 2: similarity fallback if nothing crossed threshold
+            if best_score < CONFIDENCE_THRESHOLD:
+                sim_rule, sim_score, sim_diag = self._best_similarity_explain(
+                    verified_rules, decision
+                )
+                if sim_score > best_score:
+                    best_rule = sim_rule
+                    best_score = sim_score
+                    best_method = "similarity"
+                    best_diagnostics = sim_diag
+
+        if best_score >= CONFIDENCE_THRESHOLD and best_rule is not None:
+            return (
+                RuleCheckResult(
+                    decision_id=decision.decision_id,
+                    matched=True,
+                    rule_id=best_rule.rule_id,
+                    rule_name=best_rule.name,
+                    confidence=round(best_score, 4),
+                    match_method=best_method,
+                ),
+                best_diagnostics,
+            )
+
+        return (
+            RuleCheckResult(
+                decision_id=decision.decision_id,
+                matched=False,
+                confidence=round(best_score, 4),
+                match_method="none",
+            ),
+            best_diagnostics,
         )
 
     def _best_structured(
         self, rules: list[Rule], decision: Decision
     ) -> tuple[Rule | None, float, str]:
+        rule, score, method, _ = self._best_structured_explain(rules, decision)
+        return rule, score, method
+
+    def _best_structured_explain(
+        self, rules: list[Rule], decision: Decision
+    ) -> tuple[Rule | None, float, str, MatchDiagnostics | None]:
         best_rule: Rule | None = None
         best_score = 0.0
+        best_diag: MatchDiagnostics | None = None
         for rule in rules:
-            score = self._predicate_matcher.match(rule, decision)
-            if score > best_score:
-                best_score = score
+            diag = self._predicate_matcher.match_explain(rule, decision)
+            if diag.score > best_score:
+                best_score = diag.score
                 best_rule = rule
-        return best_rule, best_score, "structured_predicate"
+                best_diag = diag
+        return best_rule, best_score, "structured_predicate", best_diag
 
     def _best_similarity(
         self, rules: list[Rule], decision: Decision
     ) -> tuple[Rule | None, float]:
+        rule, score, _ = self._best_similarity_explain(rules, decision)
+        return rule, score
+
+    def _best_similarity_explain(
+        self, rules: list[Rule], decision: Decision
+    ) -> tuple[Rule | None, float, MatchDiagnostics | None]:
         best_rule: Rule | None = None
         best_score = 0.0
+        best_diag: MatchDiagnostics | None = None
         for rule in rules:
-            score = self._similarity_matcher.match(rule, decision)
-            if score > best_score:
-                best_score = score
+            diag = self._similarity_matcher.match_explain(rule, decision)
+            if diag.score > best_score:
+                best_score = diag.score
                 best_rule = rule
-        return best_rule, best_score
+                best_diag = diag
+        return best_rule, best_score, best_diag
 
     # ------------------------------------------------------------------
     # Query
