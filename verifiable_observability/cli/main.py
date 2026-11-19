@@ -1099,17 +1099,50 @@ def verify_rules_cmd(
 def audit_cert_cmd(
     trajectory_id: Annotated[Optional[str], typer.Option(help="Specific trajectory UUID to audit; defaults to latest")] = None,
     db: Annotated[str, typer.Option(help="Path to SQLite DB")] = "verifiable_observability.db",
+    out: Annotated[Optional[str], typer.Option("--out", "-o", help="File path to save the generated ComplianceCertificate JSON")] = None,
+    verify_file: Annotated[Optional[str], typer.Option("--verify-file", help="Path to an existing certificate JSON file to verify offline")] = None,
 ):
     """
     [bold]Cryptographic Audit[/bold] — Perform offline hash-chain and execution ticket audit.
     Generates a cryptographically signed Verifiable Compliance Certificate (VCC).
     """
-    from verifiable_observability.core.audit_verifier import AuditVerifier
+    from verifiable_observability.core.audit_verifier import AuditVerifier, ComplianceCertificate
     from verifiable_observability.storage.db import TrajectoryStore, create_db_engine
-    
+
+    verifier = AuditVerifier()
+
+    # Offline certificate verification flow
+    if verify_file:
+        cert_path = Path(verify_file)
+        if not cert_path.exists():
+            console.print(f"[red]Certificate file not found: {verify_file}[/red]")
+            raise typer.Exit(1)
+        try:
+            cert_json = cert_path.read_text(encoding="utf-8")
+            cert = ComplianceCertificate.from_json(cert_json)
+        except Exception as exc:
+            console.print(f"[red]Failed to parse certificate JSON: {exc}[/red]")
+            raise typer.Exit(1)
+
+        is_valid = verifier.verify_certificate(cert)
+        console.rule("[bold cyan]Offline Compliance Certificate Verification[/bold cyan]")
+        console.print(f"Certificate ID:  [bold]{cert.certificate_id}[/bold]")
+        console.print(f"Trajectory ID:   [bold]{cert.trajectory_id}[/bold]")
+        console.print(f"Auditor:         [bold]{cert.auditor_id}[/bold]")
+        console.print(f"Issued At:       [bold]{cert.issued_at}[/bold]")
+        console.print(f"Merkle Root:     [bold green]{cert.merkle_root}[/bold green]")
+        console.print(f"Audit Status:    [bold]{cert.audit_status.value}[/bold]")
+
+        if is_valid:
+            console.print(Panel("[bold green]CERTIFICATE AUTHENTIC & CRYPTOGRAPHICALLY VALID[/bold green]\nSignature matches auditor payload.", border_style="green"))
+        else:
+            console.print(Panel("[bold red]CERTIFICATE SIGNATURE INVALID OR PAYLOAD TAMPERED[/bold red]", border_style="red"))
+            raise typer.Exit(1)
+        return
+
     engine = create_db_engine(db)
     store = TrajectoryStore(engine)
-    
+
     if trajectory_id:
         traj = store.load(trajectory_id)
         if not traj:
@@ -1125,11 +1158,10 @@ def audit_cert_cmd(
         if not traj:
             console.print("[red]Failed to load latest trajectory.[/red]")
             raise typer.Exit(1)
-            
-    verifier = AuditVerifier()
+
     res = verifier.verify_trajectory(traj)
     cert = verifier.generate_compliance_certificate(traj)
-    
+
     console.rule("[bold cyan]Cryptographic Audit Verification[/bold cyan]")
     console.print(f"Trajectory ID: [bold]{traj.trajectory_id}[/bold]")
     console.print(f"Domain: [bold]{traj.task.domain.value}[/bold] | Turns: {res.total_turns} | Actions: {res.total_actions}")
@@ -1138,8 +1170,125 @@ def audit_cert_cmd(
     console.print(f"Audit Status: [bold]{res.status.value}[/bold]")
     console.print(f"Hash Chain Integrity: {'[green]VALID[/green]' if res.hash_chain_valid else '[red]BROKEN[/red]'}")
     console.print(f"Execution Tickets:    {'[green]VALID[/green]' if res.tickets_valid else '[red]INVALID[/red]'}")
-    
-    console.print(Panel(cert.to_json(), title="Verifiable Compliance Certificate (VCC)", border_style="green"))
+
+    cert_json = cert.to_json()
+    console.print(Panel(cert_json, title="Verifiable Compliance Certificate (VCC)", border_style="green"))
+
+    if out:
+        out_path = Path(out)
+        out_path.write_text(cert_json, encoding="utf-8")
+        console.print(f"[bold green]Certificate exported successfully to {out_path.resolve()}[/bold green]")
+
+
+@app.command("check")
+def check_cmd(
+    db: Annotated[str, typer.Option(help="Path to SQLite DB")] = "verifiable_observability.db",
+):
+    """
+    [bold]System Pre-flight Diagnostics[/bold] — Comprehensive verification of runtime,
+    database schema, Rule Bank domain coverage, cryptographic subsystem, and LLM adapters.
+    """
+    from verifiable_observability.core.audit_verifier import AuditVerifier, MerkleTree
+    from verifiable_observability.core.execution_ticket import TicketIssuer, TicketValidator, Action
+    from verifiable_observability.storage.db import RuleStore, TrajectoryStore, create_db_engine
+    from verifiable_observability.storage.models import Domain, VerificationStatus
+
+    table = Table(title="Verifiable Observability — System Diagnostics", show_lines=True)
+    table.add_column("Subsystem", style="bold cyan")
+    table.add_column("Status", style="bold")
+    table.add_column("Details")
+    table.add_column("Action / Recommendation")
+
+    all_passed = True
+
+    # 1. Python Environment
+    py_ver = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+    if sys.version_info >= (3, 11):
+        table.add_row("Runtime", "[green]PASS[/green]", f"Python {py_ver} on {sys.platform}", "Compatible")
+    else:
+        table.add_row("Runtime", "[red]FAIL[/red]", f"Python {py_ver} (requires >= 3.11)", "Upgrade Python")
+        all_passed = False
+
+    # 2. Database Connectivity & Records
+    db_file = Path(db)
+    if db_file.exists():
+        try:
+            engine = create_db_engine(db)
+            traj_store = TrajectoryStore(engine)
+            rule_store = RuleStore(engine)
+            t_count = len(traj_store.list_trajectories(limit=1000))
+            r_count = len(rule_store.list_rules())
+            table.add_row("Storage (SQLite)", "[green]PASS[/green]", f"{db} connected ({t_count} trajectories, {r_count} rules)", "Healthy")
+        except Exception as exc:
+            table.add_row("Storage (SQLite)", "[red]FAIL[/red]", f"Connection error: {exc}", "Check SQLite DB path/permissions")
+            all_passed = False
+    else:
+        table.add_row("Storage (SQLite)", "[yellow]WARN[/yellow]", f"{db} does not exist yet (will auto-create on run)", "Run 'vo demo' or 'vo run'")
+
+    # 3. Rule Bank Domain Coverage
+    try:
+        engine = create_db_engine(db)
+        rule_store = RuleStore(engine)
+        domains_status = []
+        missing_domains = []
+        for dom in [Domain.FINANCE, Domain.HEALTHCARE, Domain.CODE_EXECUTION, Domain.ECOMMERCE]:
+            cnt = len(rule_store.list_rules(domain=dom.value, status=VerificationStatus.VERIFIED.value))
+            domains_status.append(f"{dom.value}: {cnt}")
+            if cnt == 0:
+                missing_domains.append(dom.value)
+
+        if not missing_domains:
+            table.add_row("Rule Bank", "[green]PASS[/green]", " | ".join(domains_status), "All domains verified")
+        else:
+            table.add_row("Rule Bank", "[yellow]WARN[/yellow]", " | ".join(domains_status), f"Seed missing: 'vo domain seed {'/'.join(missing_domains)}'")
+    except Exception as exc:
+        table.add_row("Rule Bank", "[red]FAIL[/red]", str(exc), "Re-initialize RuleStore")
+        all_passed = False
+
+    # 4. Cryptographic Subsystem Self-Test
+    try:
+        secret = os.environ.get("VO_SIGNING_SECRET", "vo-default-secret-key-change-in-production").encode("utf-8")
+        issuer = TicketIssuer(secret=secret)
+        validator = TicketValidator(secret=secret)
+        test_action = Action(tool_name="test_tool", parameters={"amount": 100})
+        ticket = issuer.issue(test_action, "test_traj", 1)
+        validator.validate(ticket, test_action, "test_traj", 1)
+        tree = MerkleTree(["leaf1", "leaf2"])
+        assert len(tree.root) == 64
+        table.add_row("Cryptography", "[green]PASS[/green]", f"HMAC tickets & SHA-256 Merkle root operational (Root: {tree.root[:12]}...)", "Production ready")
+    except Exception as exc:
+        table.add_row("Cryptography", "[red]FAIL[/red]", f"Self-test failed: {exc}", "Check cryptography dependencies")
+        all_passed = False
+
+    # 5. LLM Adapter Configuration
+    llm_details = []
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        llm_details.append("Anthropic: [green]configured[/green]")
+    else:
+        llm_details.append("Anthropic: [dim]missing key[/dim]")
+
+    if os.environ.get("OPENAI_API_KEY"):
+        llm_details.append("OpenAI: [green]configured[/green]")
+    else:
+        llm_details.append("OpenAI: [dim]missing key[/dim]")
+
+    ollama_host = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
+    llm_details.append(f"Ollama: {ollama_host}")
+    table.add_row("LLM Providers", "[green]INFO[/green]", " | ".join(llm_details), "Set API keys in .env for cloud inference")
+
+    console.print(table)
+    if all_passed:
+        console.print(Panel("[bold green]ALL CORE SUBSYSTEMS OPERATIONAL & VERIFIED[/bold green]", border_style="green"))
+    else:
+        console.print(Panel("[bold yellow]SOME SUBSYSTEMS REQUIRE ATTENTION BEFORE FULL OPERATION[/bold yellow]", border_style="yellow"))
+
+
+@app.command("health")
+def health_cmd(
+    db: Annotated[str, typer.Option(help="Path to SQLite DB")] = "verifiable_observability.db",
+):
+    """Alias for 'vo check'."""
+    check_cmd(db=db)
 
 
 @app.command("benchmark-tax")
