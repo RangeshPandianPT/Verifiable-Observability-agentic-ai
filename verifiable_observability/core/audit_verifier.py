@@ -212,6 +212,28 @@ class ComplianceCertificate:
     def to_json(self, indent: int = 2) -> str:
         return json.dumps(self.to_dict(), indent=indent)
 
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ComplianceCertificate:
+        return cls(
+            certificate_id=data["certificate_id"],
+            trajectory_id=data["trajectory_id"],
+            domain=Domain(data["domain"]),
+            task_id=data["task_id"],
+            merkle_root=data["merkle_root"],
+            chain_head_hash=data["chain_head_hash"],
+            total_turns=int(data["total_turns"]),
+            total_actions=int(data["total_actions"]),
+            audit_status=AuditStatus(data["audit_status"]),
+            issued_at=data["issued_at"],
+            auditor_id=data["auditor_id"],
+            certificate_hash=data["certificate_hash"],
+            signature=data["signature"],
+        )
+
+    @classmethod
+    def from_json(cls, json_str: str) -> ComplianceCertificate:
+        return cls.from_dict(json.loads(json_str))
+
 
 # ---------------------------------------------------------------------------
 # Cryptographic Audit Verifier
